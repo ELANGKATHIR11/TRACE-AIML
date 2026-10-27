@@ -4,8 +4,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python: 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green.svg)](https://fastapi.tiangolo.com/)
-[![React: 18](https://img.shields.io/badge/Frontend-React%2018%20TypeScript-61dafb.svg)](https://react.dev/)
-[![Tailwind / GovTech UI](https://img.shields.io/badge/UI%2FUX-Simple%20%26%20Professional%20GovTech-1f3a6e.svg)]()
 [![Local LLM: Ollama](https://img.shields.io/badge/Ollama-qwen2.5%3A1.5b--instruct-orange.svg)](https://ollama.com/)
 [![Security: AES-256-GCM](https://img.shields.io/badge/Security-AES--256--GCM-red.svg)]()
 [![Vector DB: ChromaDB](https://img.shields.io/badge/Vector%20Store-ChromaDB%20VRAG%2FMRAG-blueviolet.svg)]()
@@ -50,12 +48,12 @@ graph TB
     classDef ledgerLayer fill:#FFFBEB,stroke:#B45309,stroke-width:2px,color:#78350F;
     classDef decisionLayer fill:#F0F9FF,stroke:#0369A1,stroke-width:2px,color:#0C4A6E;
 
-    %% LAYER 1: CLIENT PRESENTATION TIER
-    subgraph L1 ["LAYER 1: INSTITUTIONAL GOVTECH FRONTEND (REACT 18 + TYPESCRIPT)"]
+    %% LAYER 1: API INTEGRATION & INTERACTIVE SWAGGER SPEC
+    subgraph L1 ["LAYER 1: REST API & OPENAPI SWAGGER SPECIFICATION"]
         direction TB
-        C1["Applicant Portal<br/>- Stream 1 Institutional Declaration<br/>- Closed-Loop Rectification Workspace<br/>- Application Tracking & Status"]:::clientLayer
-        C2["Scrutiny Officer Workspace<br/>- Dual-Pane Split Dossier Inspector<br/>- Dynamic Red Bounding Box Page Previews<br/>- Side-by-Side Authority Record Comparison"]:::clientLayer
-        C3["Bureau Intelligence & Vigilance Suite<br/>- Handbook Semantic RAG Search<br/>- ML Model Registry & Performance Metrics<br/>- Grounded 3-Role AI Advisory Reviews<br/>- SHA-256 Tamper-Evident Merkle Ledger"]:::clientLayer
+        C1["AICTE Portal Client Integration<br/>- Stream 1 Institutional Declaration<br/>- Closed-Loop Rectification Payloads<br/>- Application Tracking & Status Endpoints"]:::clientLayer
+        C2["Bureau Scrutiny & Regulatory Gateway<br/>- Dual-Pane Evidence Endpoints<br/>- Dynamic Red Bounding Box Page PNG Previews<br/>- Side-by-Side Authority Record Comparison APIs"]:::clientLayer
+        C3["Vigilance & Admin Intelligence Endpoints<br/>- Handbook Semantic RAG Search (`/api/rag/search`)<br/>- ML Model Registry & Performance Metrics (`/api/models/metrics`)<br/>- Grounded 3-Role AI Advisory Reviews<br/>- SHA-256 Tamper-Evident Merkle Ledger (`/api/audit/verify-chain`)"]:::clientLayer
     end
 
     %% LAYER 2: SECURITY & ZERO-TRUST GATEWAY
@@ -143,14 +141,6 @@ graph TB
 | **Local LLM Inference** | `ollama` (`qwen2.5:1.5b-instruct`) | Local on-premises structured advisory analysis without cloud APIs |
 | **Testing & Quality Assurance**| `pytest`, `pytest-asyncio` | Automated security, verification, and regression test suites |
 
-### Frontend (Modern Institutional Web Cockpit)
-| Category | Library / Tool | Exact Role in Platform |
-| :--- | :--- | :--- |
-| **Core Framework** | `react` (v18.3.1), `react-dom` | Reactive UI view rendering |
-| **Language & Tooling** | `typescript` (v5.5.3), `vite` (v5.4.1) | Type safety, ultra-fast development, and production bundling |
-| **Styling & Design System** | Custom Clean Institutional CSS | Warm paper background (`#f5f6f8`), hairline borders, crisp system typography, tabular numerals |
-| **Icons** | `lucide-react` | Clean institutional iconography |
-
 ---
 
 ## 4. Key Functional Modules & Endpoints
@@ -223,7 +213,6 @@ python -m pytest -v test_master_verification_suite.py
 
 ### Prerequisites
 - Python 3.11 with virtual environment or Conda.
-- Node.js 18+ and npm.
 - (Optional) Local Ollama running `qwen2.5:1.5b-instruct` on `http://localhost:11434`.
 
 ### 1. Run the Backend API
@@ -231,17 +220,10 @@ python -m pytest -v test_master_verification_suite.py
 cd backend
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 # Interactive OpenAPI / Swagger Docs: http://localhost:8000/docs
+# JSON OpenAPI Specification: http://localhost:8000/openapi.json
 ```
 
-### 2. Run the Frontend Cockpit
-```bash
-cd frontend
-npm install
-npm run dev
-# Institutional Scrutiny Cockpit: http://localhost:5173/
-```
-
-### 3. Prototype Demonstration Accounts
+### 2. Prototype Demonstration Accounts
 | Persona | Email | Password | Access Level |
 | :--- | :--- | :--- | :--- |
 | **Institution Applicant** | `applicant@apexedu.ac.in` | `password123` | Application creation, document intake, rectification |
