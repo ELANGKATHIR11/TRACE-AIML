@@ -27,3 +27,16 @@ def list_audit_logs(
     if application_id is not None:
         statement = statement.where(AuditLog.application_id == application_id)
     return session.exec(statement).all()
+
+
+@router.get("/verify-chain")
+def verify_audit_ledger_chain(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Cryptographically verify the integrity of the entire audit chain.
+    Ensures zero tampering, block modifications, or deleted entries.
+    """
+    from app.services.audit_service import audit_service
+    return audit_service.verify_audit_chain(session)

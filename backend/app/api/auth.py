@@ -3,6 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlmodel import Session, select
 
 from app.database import get_session
+from app.models.enums import UserRole
 from app.models.models import User
 from app.schemas.schemas import TokenResponse, UserCreate, UserRead
 from app.services.audit_service import log_audit_event
@@ -56,11 +57,19 @@ def register_user(
             detail="Email is already registered.",
         )
 
+    # Security Guard: Public registration can ONLY create APPLICANT accounts.
+    # Privileged accounts (REVIEWER, ADMIN) require administrative provisioning.
+    if payload.role != UserRole.APPLICANT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Public registration cannot create administrative or reviewer accounts. Only 'applicant' accounts can be registered.",
+        )
+
     user = User(
         email=payload.email,
         full_name=payload.full_name,
         hashed_password=hash_password(payload.password),
-        role=payload.role,
+        role=UserRole.APPLICANT,
         institution_id=payload.institution_id,
     )
     session.add(user)

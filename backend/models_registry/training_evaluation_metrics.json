@@ -1,0 +1,30 @@
+{
+  "document_classifier": {
+    "model_name": "document_classifier_v1",
+    "model_type": "TF-IDF + LogisticRegression",
+    "trained_at": "2026-10-27T08:41:38.534825+00:00",
+    "train_samples": 30,
+    "test_samples": 10,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0,
+    "classes": [
+      "BALANCE_SHEET",
+      "FACULTY_LIST",
+      "FIRE_SAFETY",
+      "LAND_DOCUMENT"
+    ]
+  },
+  "forgery_detector": {
+    "model_name": "forgery_detector_v1",
+    "model_type": "RandomForestClassifier(n_estimators=100)",
+    "trained_at": "2026-10-27T08:41:38.624550+00:00",
+    "train_samples": 30,
+    "test_samples": 10,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1_score": 1.0
+  }
+}

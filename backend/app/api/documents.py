@@ -36,6 +36,13 @@ async def upload_document(
     if not app_obj:
         raise HTTPException(status_code=404, detail="Application not found")
 
+    # IDOR Check: Applicants can only upload to their institution's application
+    if current_user.role == UserRole.APPLICANT and app_obj.institution_id != current_user.institution_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You cannot upload documents to another institution's application.",
+        )
+
     # Read bytes
     contents = await file.read()
     
@@ -121,6 +128,13 @@ def verify_single_document(
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
 
+    app_obj = db.get(Application, doc.application_id)
+    if current_user.role == UserRole.APPLICANT and app_obj and app_obj.institution_id != current_user.institution_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You cannot verify documents belonging to another institution.",
+        )
+
     result = verification_service.process_document(db, doc)
     return {
         "message": "Document verification completed",
@@ -134,6 +148,16 @@ def list_application_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all documents attached to an application."""
+    """List all documents attached to an application with IDOR validation."""
+    app_obj = db.get(Application, application_id)
+    if not app_obj:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    if current_user.role == UserRole.APPLICANT and app_obj.institution_id != current_user.institution_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You cannot view documents from another institution's application.",
+        )
+
     docs = db.exec(select(Document).where(Document.application_id == application_id)).all()
     return docs

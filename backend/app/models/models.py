@@ -185,6 +185,7 @@ class AuditLog(SQLModel, table=True):
     """
     Strict, immutable log of rules applied, records checked, API responses,
     alerts generated, observations, and actions taken (PRD §4.5).
+    Forms an unalterable Merkle-chained tamper-evident ledger.
     """
     __tablename__ = "audit_logs"
 
@@ -198,3 +199,7 @@ class AuditLog(SQLModel, table=True):
     summary: str
     details: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     timestamp: datetime = Field(default_factory=utc_now, index=True)
+
+    # Tamper-Evident Merkle Chaining
+    prev_record_hash: str = Field(default="GENESIS", index=True)
+    record_hash: str = Field(default="", index=True)
