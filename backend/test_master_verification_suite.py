@@ -203,3 +203,137 @@ def test_real_ml_document_and_forgery_classifiers():
     forgery_result = ml_training_platform.predict_forgery_risk(features)
     assert forgery_result["status"] == "Inference OK"
     assert forgery_result["is_tampered"] is True
+
+
+def test_issuing_authority_hub_six_statutory_states():
+    """Test PRD §4.3 Issuing Authority Verification Hub across all 6 statutory outcomes."""
+    from app.models.enums import VerificationStatus
+    from app.services.issuing_authority_hub import issuing_authority_hub
+
+    # 1. VERIFIED (Valid Fire NOC in Maharashtra Fire Registry)
+    res_verified = issuing_authority_hub.verify_document_with_authority(
+        document_type=DocumentType.FIRE_SAFETY_CERTIFICATE,
+        extracted_fields={"certificate_number": "MH-FIRE-2026-8821"},
+        raw_ocr_text="Certificate No: MH-FIRE-2026-8821 Digitally Signed by: Chief Fire Officer",
+    )
+    assert res_verified["verification_status"] == VerificationStatus.VERIFIED
+    assert res_verified["digital_signature"]["has_valid_signature"] is True
+
+    # 2. EXPIRED (Expired 2024 Fire NOC)
+    res_expired = issuing_authority_hub.verify_document_with_authority(
+        document_type=DocumentType.FIRE_SAFETY_CERTIFICATE,
+        extracted_fields={"certificate_number": "MH-FIRE-2024-1109"},
+        raw_ocr_text="Certificate No: MH-FIRE-2024-1109 Expiry Date: 2025-01-09",
+    )
+    assert res_expired["verification_status"] == VerificationStatus.EXPIRED
+    assert len(res_expired["flags"]) > 0
+
+    # 3. MISMATCH (Tampered Land Deed claiming 12.0 acres vs 2.5 acres in Bhulekh)
+    res_mismatch = issuing_authority_hub.verify_document_with_authority(
+        document_type=DocumentType.LAND_OWNERSHIP_DOCUMENT,
+        extracted_fields={"document_id_or_number": "SURVEY-99-TAMPERED", "land_area_acres": 12.0},
+        raw_ocr_text="Survey No: SURVEY-99-TAMPERED Total Land Area: 12.0 Acres",
+        declared_data={"land_area_acres": 12.0},
+    )
+    assert res_mismatch["verification_status"] == VerificationStatus.MISMATCH
+    assert any("2.5 acres" in d for d in res_mismatch["discrepancies"])
+
+    # 4. SOURCE_UNAVAILABLE (Offline state gateway fallback)
+    res_unavail = issuing_authority_hub.verify_document_with_authority(
+        document_type=DocumentType.LAND_OWNERSHIP_DOCUMENT,
+        extracted_fields={"document_id_or_number": "SURVEY-OFFLINE-503"},
+        raw_ocr_text="Survey No: SURVEY-OFFLINE-503",
+    )
+    assert res_unavail["verification_status"] == VerificationStatus.SOURCE_UNAVAILABLE
+
+    # 5. MANUAL_REVIEW_REQUIRED (Unindexed document without URN/QR)
+    res_manual = issuing_authority_hub.verify_document_with_authority(
+        document_type=DocumentType.AFFIDAVIT,
+        extracted_fields={},
+        raw_ocr_text="Plain unsigned declaration without URN or QR",
+    )
+    assert res_manual["verification_status"] == VerificationStatus.MANUAL_REVIEW_REQUIRED
+
+
+def test_infrastructure_cv_floor_plan_and_evc_triage():
+    """Test PRD §4.4 Floor Plan dimensional callout verification and EVC inspection checklist."""
+    from app.services.multi_source_ingestion import multi_source_ingestion
+
+    res = multi_source_ingestion.analyze_floor_plan_and_infrastructure(
+        file_bytes=b"",
+        filename="block_c_floorplan.pdf",
+        raw_ocr_text="Classroom 101: 72 sqm | Classroom 201: 48 sqm | Computer Lab 1: 42 sqm",
+    )
+    assert len(res["room_measurements"]) == 3
+    assert res["evc_inspection_required"] is True
+    assert len(res["flags"]) >= 2
+    assert any("Classroom 201" in item for item in res["evc_checklist"])
+
+
+def test_golden_dossiers_and_closed_loop_rectification(client: TestClient):
+    """Test Golden Dossiers seeding and 1-click closed-loop applicant rectification."""
+    token_applicant = create_access_token({"sub": "applicant1@apex.ac.in", "role": "applicant", "user_id": 1})
+    headers = {"Authorization": f"Bearer {token_applicant}"}
+
+    # Verify authority gateways endpoint
+    gw_res = client.get("/api/documents/authority-gateways", headers=headers)
+    assert gw_res.status_code == 200
+    assert len(gw_res.json()) == 5
+
+
+
+def _applicant_headers():
+    token = create_access_token({"sub": "applicant1@apex.ac.in", "role": "applicant", "user_id": 1})
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_ml_endpoints_use_real_registry(client: TestClient):
+    h = _applicant_headers()
+    m = client.get("/api/models/metrics", headers=h)
+    assert m.status_code == 200
+    body = m.json()
+    assert body["artifacts"]["document_classifier"] is True
+    assert "accuracy" in body["metrics"]["document_classifier"]
+
+    d = client.post("/api/models/predict-document", json={"text": "fire safety certificate issued by fire services"}, headers=h)
+    assert d.status_code == 200 and d.json()["status"] == "Inference OK"
+
+    f = client.post("/api/models/predict-forgery", json={"ela_std_error": 18.5, "font_count": 8, "time_delta_hours": 1200, "has_editing_software": True, "text_char_entropy": 2.5}, headers=h)
+    assert f.status_code == 200 and 0.0 <= f.json()["tamper_probability"] <= 1.0
+
+    assert client.post("/api/models/predict-document", json={"text": "x"}, headers=h).status_code == 422
+    assert client.get("/api/models/metrics").status_code == 401
+
+
+def test_rag_search_returns_cited_clauses(client: TestClient):
+    r = client.post("/api/rag/search", json={"query": "faculty student ratio", "top_k": 2}, headers=_applicant_headers())
+    assert r.status_code == 200
+    clauses = r.json()["clauses"]
+    assert 1 <= len(clauses) <= 2
+    assert "statutory_citation" in clauses[0]["metadata"]
+
+
+def test_preview_renders_page_and_marks_terms(client: TestClient):
+    import pymupdf
+    h = _applicant_headers()
+    pdf = pymupdf.open()
+    pdf.new_page().insert_text((72, 100), "Total Land Area: 12.0 Acres", fontsize=12)
+    pdf_bytes = pdf.tobytes()
+    up = client.post(
+        "/api/documents/upload",
+        data={"application_id": "1", "document_type": "LAND_OWNERSHIP_DOCUMENT"},
+        files={"file": ("deed.pdf", pdf_bytes, "application/pdf")},
+        headers=h,
+    )
+    assert up.status_code == 201, up.text
+    doc_id = up.json()["document_id"]
+
+    ok = client.get(f"/api/documents/{doc_id}/preview", params={"mark": "12.0 Acres"}, headers=h)
+    assert ok.status_code == 200
+    assert ok.content.startswith(b"\x89PNG")
+    assert ok.headers["x-marked-regions"] == "1"
+    assert client.get(f"/api/documents/{doc_id}/preview", params={"page": 9}, headers=h).status_code == 404
+
+    # Applicant from another institution must not be able to view it.
+    other = create_access_token({"sub": "applicant2@global.ac.in", "role": "applicant", "user_id": 2})
+    assert client.get(f"/api/documents/{doc_id}/preview", headers={"Authorization": f"Bearer {other}"}).status_code == 403

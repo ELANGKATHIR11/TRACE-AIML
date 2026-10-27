@@ -1,17 +1,18 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.database import get_session
 from app.models.enums import ApplicationStatus, UserRole
-from app.models.models import Application, ChecklistRule, Document, Institution, User
+from app.models.models import Application, ChecklistRule, Document, Institution, User, ValidationFlag
 from app.schemas.schemas import (
     ApplicationCreate,
     ApplicationDetailResponse,
     ChecklistItemStatus,
     InstitutionCreate,
     InstitutionRead,
+    ValidationFlagRead,
 )
 from app.services.audit_service import log_audit_event
 from app.services.security import get_current_user, require_roles
@@ -249,46 +250,6 @@ def validate_application(
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.post("/applications/{application_id}/agent-audit", tags=["Institutions & Applications (PRD §4.1)"])
-def run_autonomous_agent_audit(
-    application_id: int,
-    session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Run CrewAI autonomous multi-agent scrutiny workflow.
-    If CrewAI agent execution is unavailable or times out, safely falls back
-    to deterministic offline verification without failure.
-    """
-    application = session.get(Application, application_id)
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
-
-    if current_user.role == UserRole.APPLICANT and application.institution_id != current_user.institution_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied: You cannot trigger agent audits on applications belonging to another institution.",
-        )
-
-    # Deterministic verification first to ensure baseline integrity
-    from app.services.verification_services import verification_service
-    base_result = verification_service.verify_entire_application(session, application_id)
-
-    agent_status = "CrewAI multi-agent audit pipeline ready and accessible."
-    report_link = "/reports/CREWAI_AUTONOMOUS_REGULATORY_AUDIT_REPORT.md"
-
-    return {
-        "status": "SUCCESS",
-        "application_id": application_id,
-        "application_number": application.application_number,
-        "agent_orchestration": "CrewAI + Local Ollama (qwen2.5:1.5b-instruct)",
-        "fallback_mode": "Deterministic Rules Engine Active",
-        "report_url": report_link,
-        "verification_summary": base_result,
-        "message": agent_status,
-    }
-
-
 @router.get("/applications/queue/pending-review", response_model=List[Application])
 def get_pending_review_queue(
     session: Session = Depends(get_session),
@@ -358,4 +319,135 @@ def record_officer_determination(
         "officer": current_user.email,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/applications/{application_id}/flags", response_model=List[ValidationFlagRead])
+def list_application_flags(
+    application_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    List all explainable AI & rule-based flags (PRD §4.2, §4.4, §5) for an application.
+    """
+    application = session.get(Application, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    if current_user.role == UserRole.APPLICANT and application.institution_id != current_user.institution_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You cannot view flags for another institution's application.",
+        )
+
+    flags = session.exec(
+        select(ValidationFlag).where(ValidationFlag.application_id == application_id)
+    ).all()
+    return flags
+
+
+@router.post("/flags/{flag_id}/resolve", response_model=ValidationFlagRead)
+def resolve_validation_flag(
+    flag_id: int,
+    reviewer_action: str,  # CONFIRMED_DEFICIENCY, DISMISSED_FALSE_POSITIVE, RECTIFIED_BY_APPLICANT
+    reviewer_notes: str = "",
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_roles([UserRole.REVIEWER, UserRole.ADMIN])),
+):
+    """
+    Human-in-the-loop resolution of an individual AI/Rule validation flag by an AICTE Official.
+    """
+    flag = session.get(ValidationFlag, flag_id)
+    if not flag:
+        raise HTTPException(status_code=404, detail="Validation flag not found")
+
+    flag.is_resolved = True
+    flag.reviewer_action = reviewer_action.upper().strip()
+    flag.reviewer_notes = reviewer_notes
+    flag.reviewed_by_user_id = current_user.id
+    flag.reviewed_at = datetime.now(timezone.utc)
+
+    session.add(flag)
+    session.commit()
+    session.refresh(flag)
+
+    log_audit_event(
+        session,
+        application_id=flag.application_id,
+        action_type="VALIDATION_FLAG_RESOLVED",
+        entity_type="ValidationFlag",
+        entity_id=str(flag.id),
+        actor=current_user,
+        summary=f"Officer '{current_user.email}' resolved flag #{flag.id} as '{flag.reviewer_action}'.",
+        details={"flag_id": flag.id, "action": flag.reviewer_action, "notes": reviewer_notes},
+    )
+    return flag
+
+
+@router.post("/applications/{application_id}/submit-rectification")
+def submit_application_rectification(
+    application_id: int,
+    applicant_notes: str = "Deficient documents replaced and application resubmitted for verification",
+    updated_declared_data: dict | None = None,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Applicant Rectification Resubmission Endpoint (PRD §4.1):
+    Allows an institution to amend declared fields or confirm replacement of flagged documents,
+    automatically re-running cross-document and issuing-authority verification.
+    """
+    application = session.get(Application, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    if current_user.role == UserRole.APPLICANT and application.institution_id != current_user.institution_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You cannot submit rectification for another institution's application.",
+        )
+
+    if updated_declared_data:
+        merged = dict(application.declared_data or {})
+        merged.update(updated_declared_data)
+        application.declared_data = merged
+        session.add(application)
+        session.commit()
+
+    from app.services.verification_services import verification_service
+    verification_result = verification_service.verify_entire_application(session, application_id)
+    session.refresh(application)
+
+    log_audit_event(
+        session,
+        application_id=application.id,
+        action_type="APPLICANT_RECTIFICATION_SUBMITTED",
+        entity_type="Application",
+        entity_id=application.application_number,
+        actor=current_user,
+        summary=f"Applicant '{current_user.email}' submitted rectification for {application.application_number}. New status: {application.status.value}.",
+        details={"applicant_notes": applicant_notes, "new_status": application.status.value},
+    )
+
+    return {
+        "message": "Rectification submitted and re-verified successfully.",
+        "application_id": application.id,
+        "application_number": application.application_number,
+        "new_status": application.status.value,
+        "verification_result": verification_result,
+    }
+
+
+@router.post("/applications/seed-golden-dossiers")
+def trigger_seed_golden_dossiers(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Ensures the 4 Golden SIH26261 Evaluation Dossiers are seeded and verified.
+    """
+    from app.services.golden_dossiers_service import seed_golden_dossiers
+    return seed_golden_dossiers(session)
+
+
 

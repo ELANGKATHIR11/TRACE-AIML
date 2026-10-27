@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import applications, audit, auth, dashboard, documents, rules
+from app.api import applications, audit, auth, dashboard, documents, intelligence, rules
 from app.config import settings
 from app.database import init_db_and_seed
 
@@ -55,6 +55,7 @@ app.include_router(applications.router)
 app.include_router(documents.router)
 app.include_router(dashboard.router)
 app.include_router(audit.router)
+app.include_router(intelligence.router)
 
 
 @app.get("/", tags=["Health"])

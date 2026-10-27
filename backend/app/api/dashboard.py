@@ -13,7 +13,20 @@ from app.models.models import Application, AuditLog, Document, User, ValidationF
 from app.services.ollama_service import ollama_service
 from app.services.security import get_current_user
 
-router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
+
+
+def _read_registry_metrics() -> Dict[str, Any]:
+    """Return the evaluation metrics persisted by the ML training platform, or {} if untrained."""
+    import json
+    from app.services.ml_training_platform import ml_training_platform
+    path = ml_training_platform.metrics_path
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 @router.get("/metrics")
@@ -29,7 +42,12 @@ def get_dashboard_metrics(
 
     total_docs = db.exec(select(func.count(Document.id))).one()
     verified_docs = db.exec(select(func.count(Document.id)).where(Document.verification_status == VerificationStatus.VERIFIED)).one()
-    flagged_docs = db.exec(select(func.count(Document.id)).where(Document.verification_status.in_([VerificationStatus.MISMATCH, VerificationStatus.MANUAL_REVIEW_REQUIRED]))).one()
+    flagged_docs = db.exec(select(func.count(Document.id)).where(Document.verification_status.in_([VerificationStatus.MISMATCH, VerificationStatus.MANUAL_REVIEW_REQUIRED, VerificationStatus.EXPIRED]))).one()
+    expired_docs = db.exec(select(func.count(Document.id)).where(Document.verification_status == VerificationStatus.EXPIRED)).one()
+    mismatch_docs = db.exec(select(func.count(Document.id)).where(Document.verification_status == VerificationStatus.MISMATCH)).one()
+    pending_docs = db.exec(select(func.count(Document.id)).where(Document.verification_status == VerificationStatus.PENDING)).one()
+    unavailable_docs = db.exec(select(func.count(Document.id)).where(Document.verification_status == VerificationStatus.SOURCE_UNAVAILABLE)).one()
+    manual_docs = db.exec(select(func.count(Document.id)).where(Document.verification_status == VerificationStatus.MANUAL_REVIEW_REQUIRED)).one()
 
     total_flags = db.exec(select(func.count(ValidationFlag.id))).one()
     critical_flags = db.exec(select(func.count(ValidationFlag.id)).where(ValidationFlag.severity == FlagSeverity.CRITICAL)).one()
@@ -50,6 +68,14 @@ def get_dashboard_metrics(
             "total": total_docs,
             "verified": verified_docs,
             "flagged_for_review": flagged_docs,
+            "authority_status_breakdown": {
+                "VERIFIED": verified_docs,
+                "MISMATCH": mismatch_docs,
+                "EXPIRED": expired_docs,
+                "PENDING": pending_docs,
+                "SOURCE_UNAVAILABLE": unavailable_docs,
+                "MANUAL_REVIEW_REQUIRED": manual_docs,
+            },
         },
         "flags": {
             "total": total_flags,
@@ -57,6 +83,8 @@ def get_dashboard_metrics(
             "resolved": resolved_flags,
             "pending_resolution": total_flags - resolved_flags,
         },
+        # Real values read from the model registry written at training time (no hardcoded figures).
+        "model_registry": _read_registry_metrics(),
         "system_status": {
             "mode": "100% Offline / Air-Gapped",
             "database": "SQLite (Authoritative)",

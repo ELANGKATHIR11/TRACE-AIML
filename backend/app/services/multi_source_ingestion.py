@@ -118,12 +118,27 @@ class MultiSourceIngestionService:
         }
 
     # -------------------------------------------------------------------------
-    # Stream 3: Infrastructure Media (JPG, PNG, MP4, Floor Plans)
+    # Stream 3: Infrastructure Media (JPG, PNG, MP4, Floor Plans, Blueprints)
     # -------------------------------------------------------------------------
-    def ingest_stream_3_infrastructure_media(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
-        """Samples frames from video or inspects room/ramp/building layout images."""
+    def ingest_stream_3_infrastructure_media(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        raw_ocr_text: str = "",
+        thresholds: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Samples frames from video or inspects architectural floor plans, room dimensions,
+        barrier-free accessibility (ramps/lifts), and fire safety readiness.
+        Generates an advisory EVC (Expert Visit Committee) Physical Inspection Triage Checklist.
+        """
         ext = Path(filename).suffix.lower()
-        findings = []
+        thresholds = thresholds or {
+            "min_classroom_area_sqm": 66.0,
+            "min_laboratory_area_sqm": 66.0,
+            "min_built_up_area_sqm": 10000.0,
+            "barrier_free_environment_required": True,
+        }
 
         if ext in [".mp4", ".avi", ".mov"]:
             # Video frame sampling
@@ -158,21 +173,151 @@ class MultiSourceIngestionService:
                 "duration_seconds": round(duration_sec, 2),
                 "total_frames": total_frames,
                 "sampled_frames": samples,
-                "verified_features": ["Video walkthrough integrity verified", f"{len(samples)} temporal checkpoints checked"],
+                "verified_features": [
+                    "Video walkthrough integrity verified",
+                    f"{len(samples)} temporal checkpoints checked",
+                ],
+                "evc_inspection_required": duration_sec < 10.0,
+                "evc_checklist": [
+                    "Verify continuous unedited walkthrough from main gate to laboratories",
+                    "Confirm geo-tagged timestamp overlay on video stream",
+                ],
             }
         else:
-            # Floor plan / raster image analysis
-            nparr = np.frombuffer(file_bytes, np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            dims = [img.shape[1], img.shape[0]] if img is not None else [0, 0]
+            # Architectural Floor Plan / Blueprint & Facility Image Analysis
+            return self.analyze_floor_plan_and_infrastructure(file_bytes, filename, raw_ocr_text, thresholds)
 
-            return {
-                "stream": 3,
-                "stream_name": "Infrastructure Media (Image/Plan)",
-                "media_type": "IMAGE_OR_PLAN",
-                "dimensions": dims,
-                "verified_features": ["High-resolution floor plan / lab image ingested", "Ready for bounding box localized overlay"],
-            }
+    def analyze_floor_plan_and_infrastructure(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        raw_ocr_text: str = "",
+        thresholds: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Inspects floor plans, blueprints, and infrastructure evidence for:
+        1. Room / Laboratory dimensional callouts (e.g. '10m x 7m = 70 sqm' or 'Classroom: 68 sqm')
+        2. Barrier-free accessibility compliance (Ramp, Lift/Elevator, Accessible Toilets)
+        3. Fire & emergency safety signage
+        4. Automated EVC (Expert Visit Committee) Physical Inspection Triage triggers
+        """
+        thresholds = thresholds or {
+            "min_classroom_area_sqm": 66.0,
+            "min_laboratory_area_sqm": 66.0,
+            "min_built_up_area_sqm": 10000.0,
+            "barrier_free_environment_required": True,
+        }
+        min_cls_sqm = float(thresholds.get("min_classroom_area_sqm", 66.0))
+        min_lab_sqm = float(thresholds.get("min_laboratory_area_sqm", 66.0))
+
+        # Decode image / PDF page dimensions and contour density (structural lines check)
+        dims = [0, 0]
+        structural_line_density = 0.0
+        try:
+            if file_bytes.startswith(b"%PDF-"):
+                doc = pymupdf.open(stream=file_bytes, filetype="pdf")
+                if len(doc) > 0:
+                    pix = doc[0].get_pixmap(dpi=100)
+                    img_b = pix.tobytes("png")
+                    nparr = np.frombuffer(img_b, np.uint8)
+                    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                    if img is not None:
+                        dims = [img.shape[1], img.shape[0]]
+                        edges = cv2.Canny(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 50, 150)
+                        structural_line_density = round(float(np.mean(edges > 0)), 4)
+                doc.close()
+            else:
+                nparr = np.frombuffer(file_bytes, np.uint8)
+                img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                if img is not None:
+                    dims = [img.shape[1], img.shape[0]]
+                    edges = cv2.Canny(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), 50, 150)
+                    structural_line_density = round(float(np.mean(edges > 0)), 4)
+        except Exception:
+            pass
+
+        text = raw_ocr_text or ""
+        text_lower = text.lower()
+
+        # Parse room dimensions (e.g., "Classroom 1: 68 sqm", "Lab-1: 48 sqm", or "8.5m x 6.0m")
+        room_measurements: List[Dict[str, Any]] = []
+        discrepancies: List[str] = []
+        flags: List[Dict[str, Any]] = []
+        evc_checklist: List[str] = []
+
+        # Pattern A: Explicit room/lab area in sqm (e.g., "Classroom 1: 68 sqm" or "Computer Lab: 45 sq.m")
+        room_pattern = re.findall(
+            r"((?:classroom|lecture\s*hall|tutorial\s*room|laboratory|computer\s*lab|workshop|seminar\s*hall)\s*[A-Za-z0-9\-#]*)\s*[:\-=]?\s*(?:\d+(?:\.\d+)?\s*m?\s*[xX*]\s*\d+(?:\.\d+)?\s*m?\s*[=:]?\s*)?(\d{2,4}(?:\.\d+)?)\s*(?:sq\.?\s*m|sqm)",
+            text,
+            re.IGNORECASE,
+        )
+        for room_label, sqm_str in room_pattern:
+            area_val = float(sqm_str)
+            label_clean = room_label.strip()
+            is_lab = any(k in label_clean.lower() for k in ("lab", "workshop"))
+            min_req = min_lab_sqm if is_lab else min_cls_sqm
+            compliant = area_val >= min_req
+            room_measurements.append({
+                "room": label_clean,
+                "type": "LABORATORY" if is_lab else "CLASSROOM",
+                "area_sqm": area_val,
+                "required_min_sqm": min_req,
+                "compliant": compliant,
+            })
+            if not compliant:
+                msg = f"{label_clean} carpet area ({area_val} sqm) is below AICTE APH norm of {min_req} sqm."
+                discrepancies.append(msg)
+                flags.append({
+                    "category": FlagCategory.INFRASTRUCTURE_DISCREPANCY,
+                    "severity": FlagSeverity.HIGH,
+                    "field_name": "floor_plan_room_dimensions",
+                    "reason": msg,
+                    "evidence": f"Floor Plan Callout: '{label_clean} = {area_val} sqm' vs Prescribed Minimum: {min_req} sqm",
+                })
+                evc_checklist.append(f"Physically measure {label_clean} laser dimensions (flagged at {area_val} sqm < {min_req} sqm).")
+
+        # Barrier-free accessibility checks (Ramp, Lift, Divyangjan / Accessible Washroom)
+        has_ramp = any(k in text_lower for k in ("ramp", "wheelchair", "barrier-free", "barrier free", "divyangjan"))
+        has_lift = any(k in text_lower for k in ("lift", "elevator"))
+        has_fire_exit = any(k in text_lower for k in ("fire exit", "emergency exit", "hydrant", "extinguisher", "staircase"))
+
+        if thresholds.get("barrier_free_environment_required", True) and text and not (has_ramp or has_lift):
+            msg = "Barrier-free accessibility features (Ramp / Lift / Divyangjan toilet) not detected in submitted infrastructure evidence."
+            discrepancies.append(msg)
+            flags.append({
+                "category": FlagCategory.INFRASTRUCTURE_DISCREPANCY,
+                "severity": FlagSeverity.MEDIUM,
+                "field_name": "barrier_free_environment",
+                "reason": msg,
+                "evidence": "AICTE APH Chapter 7 mandates barrier-free ramps/lifts; requires physical verification.",
+            })
+            evc_checklist.append("Inspect physical ramp gradient (1:12 norm) and barrier-free lift access for Divyangjan.")
+
+        if not evc_checklist:
+            evc_checklist.append("Standard random sample check of 2 classrooms and 1 laboratory during EVC visit.")
+
+        return {
+            "stream": 3,
+            "stream_name": "Infrastructure Media (Floor Plan & CV Inspection)",
+            "media_type": "IMAGE_OR_PLAN",
+            "dimensions": dims,
+            "structural_line_density": structural_line_density,
+            "room_measurements": room_measurements,
+            "accessibility_checks": {
+                "ramp_or_divyangjan_detected": has_ramp,
+                "lift_or_elevator_detected": has_lift,
+                "fire_emergency_exit_detected": has_fire_exit,
+            },
+            "discrepancies": discrepancies,
+            "flags": flags,
+            "evc_inspection_required": len(discrepancies) > 0,
+            "evc_checklist": evc_checklist,
+            "verified_features": [
+                "Architectural layout & dimensional callouts parsed",
+                f"{len(room_measurements)} room/lab carpet areas evaluated against APH Chapter 7 norms",
+                "Advisory EVC Physical Inspection Checklist compiled",
+            ],
+        }
 
     # -------------------------------------------------------------------------
     # Stream 4: Historical Institutional Database (Relational SQL)

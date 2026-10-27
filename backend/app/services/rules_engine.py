@@ -25,10 +25,13 @@ class RulesEngine:
         doc: Document,
         rules: List[ChecklistRule],
         declared_data: Dict[str, Any],
+        historical_records: Optional[Dict[str, Any]] = None,
+        institution_obj: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """Evaluate a single document against applicable regulatory checklist rules."""
         flags: List[Dict[str, Any]] = []
         extracted = doc.extracted_fields or {}
+        historical_records = historical_records or {}
 
         for rule in rules:
             if not rule.is_active or rule.document_type != doc.document_type:
@@ -50,7 +53,16 @@ class RulesEngine:
             # 2. Expiration Date Check
             if rule.check_expiry and doc.expiry_date:
                 try:
-                    exp_dt = datetime.fromisoformat(doc.expiry_date.replace("Z", "+00:00"))
+                    clean_exp = str(doc.expiry_date).strip().replace("Z", "+00:00")
+                    exp_dt = None
+                    for fmt in ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%Y/%m/%d"):
+                        try:
+                            exp_dt = datetime.strptime(clean_exp.split("T")[0], fmt).replace(tzinfo=timezone.utc)
+                            break
+                        except ValueError:
+                            continue
+                    if not exp_dt:
+                        exp_dt = datetime.fromisoformat(clean_exp)
                     now_dt = datetime.now(timezone.utc)
                     if exp_dt < now_dt:
                         flags.append({
@@ -64,13 +76,28 @@ class RulesEngine:
                 except Exception:
                     pass
 
-            # 3. Consistency Targets (Cross-checking document values against Application declared data)
+            # 3. Consistency Targets (Cross-checking document values against Application & Institution baseline)
             for doc_field, target_path in rule.consistency_targets.items():
                 doc_val = extracted.get(doc_field)
                 if doc_val is None:
                     continue
 
+                # Resolve target_path from Institution, historical_records, or declared_data
                 declared_val = declared_data.get(target_path) or declared_data.get(doc_field)
+                if declared_val is None and institution_obj is not None:
+                    if target_path == "Institution.name":
+                        declared_val = getattr(institution_obj, "name", None)
+                    elif target_path == "Institution.aicte_permanent_id":
+                        declared_val = getattr(institution_obj, "aicte_permanent_id", None)
+                    elif target_path.startswith("Institution.historical_records."):
+                        subkey = target_path.split("Institution.historical_records.")[-1]
+                        declared_val = historical_records.get(subkey)
+                    elif target_path.startswith("historical_records."):
+                        subkey = target_path.split("historical_records.")[-1]
+                        declared_val = historical_records.get(subkey)
+                if declared_val is None:
+                    declared_val = historical_records.get(doc_field)
+
                 if declared_val is not None:
                     match, discrepancy_msg = self._compare_values(doc_val, declared_val)
                     if not match:
@@ -78,8 +105,24 @@ class RulesEngine:
                             "category": FlagCategory.CROSS_DOC_INCONSISTENCY,
                             "severity": FlagSeverity.HIGH,
                             "field_name": doc_field,
-                            "reason": f"Cross-document value mismatch: {discrepancy_msg}",
-                            "evidence": f"Document value: '{doc_val}' vs Declared value: '{declared_val}'",
+                            "reason": f"Cross-document / institutional baseline mismatch: {discrepancy_msg}",
+                            "evidence": f"Document '{doc_field}': '{doc_val}' vs Authorized Record ({target_path}): '{declared_val}'",
+                            "rule_id": rule.id,
+                        })
+
+            # 4. Infrastructure Thresholds Check (PRD §4.4)
+            if rule.infrastructure_thresholds:
+                min_built_up = rule.infrastructure_thresholds.get("min_built_up_area_sqm")
+                doc_built_up = extracted.get("built_up_area_sqm") or extracted.get("building_area_sqm")
+                if min_built_up and doc_built_up is not None:
+                    num_b = self._extract_first_number(doc_built_up)
+                    if num_b is not None and num_b < float(min_built_up):
+                        flags.append({
+                            "category": FlagCategory.INFRASTRUCTURE_DISCREPANCY,
+                            "severity": FlagSeverity.CRITICAL,
+                            "field_name": "built_up_area_sqm",
+                            "reason": f"Built-up area ({num_b} sqm) is below AICTE minimum threshold ({min_built_up} sqm)",
+                            "evidence": f"Rule: {rule.rule_name}. Extracted: {num_b} sqm < Required: {min_built_up} sqm",
                             "rule_id": rule.id,
                         })
 
@@ -100,9 +143,11 @@ class RulesEngine:
         for d in documents:
             extracted_by_type[d.document_type.value] = d.extracted_fields or {}
 
-        # 1. Missing Mandatory Document Checklist
+        # 1. Missing Mandatory Document Checklist (filtered by Application Category)
         uploaded_types = {d.document_type for d in documents}
         for r in rules:
+            if r.category != application.category:
+                continue
             if r.is_mandatory and r.document_type not in uploaded_types:
                 flags.append({
                     "category": FlagCategory.MISSING_DOCUMENT,
