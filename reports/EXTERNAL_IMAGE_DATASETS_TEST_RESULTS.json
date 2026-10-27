@@ -1,0 +1,531 @@
+[
+  {
+    "repository": "barcode",
+    "filename": "0.png",
+    "file_type": "PNG",
+    "file_size_bytes": 12189223,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "barcode",
+    "filename": "1.png",
+    "file_type": "PNG",
+    "file_size_bytes": 11253856,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "barcode",
+    "filename": "10.png",
+    "file_type": "PNG",
+    "file_size_bytes": 15375428,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "barcode",
+    "filename": "2.png",
+    "file_type": "PNG",
+    "file_size_bytes": 11248011,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "barcode",
+    "filename": "3.png",
+    "file_type": "PNG",
+    "file_size_bytes": 13487799,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "barcode",
+    "filename": "4.png",
+    "file_type": "PNG",
+    "file_size_bytes": 10115056,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "barcode",
+    "filename": "5.png",
+    "file_type": "PNG",
+    "file_size_bytes": 10697463,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "barcode",
+    "filename": "6.png",
+    "file_type": "PNG",
+    "file_size_bytes": 11649255,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "barcode",
+    "filename": "7.png",
+    "file_type": "PNG",
+    "file_size_bytes": 13963711,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "barcode",
+    "filename": "8.png",
+    "file_type": "PNG",
+    "file_size_bytes": 14638017,
+    "dimensions": "2268x3024",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10248.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 2052,
+    "dimensions": "596x842",
+    "char_count": 409,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "detected_dates",
+      "issue_date"
+    ]
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10249.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 1986,
+    "dimensions": "596x842",
+    "char_count": 358,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "detected_dates",
+      "issue_date"
+    ]
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10250.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 2093,
+    "dimensions": "596x842",
+    "char_count": 444,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "detected_dates",
+      "issue_date"
+    ]
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10251.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 2058,
+    "dimensions": "596x842",
+    "char_count": 409,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "detected_dates",
+      "issue_date"
+    ]
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10252.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 2058,
+    "dimensions": "596x842",
+    "char_count": 416,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "detected_dates",
+      "issue_date"
+    ]
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10253.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 2057,
+    "dimensions": "596x842",
+    "char_count": 414,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "detected_dates",
+      "issue_date"
+    ]
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10254.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 2039,
+    "dimensions": "596x842",
+    "char_count": 374,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "detected_dates",
+      "issue_date"
+    ]
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10255.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 2084,
+    "dimensions": "596x842",
+    "char_count": 398,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "document_id_or_number"
+    ]
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10256.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 2016,
+    "dimensions": "596x842",
+    "char_count": 380,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "detected_dates",
+      "issue_date"
+    ]
+  },
+  {
+    "repository": "CompanyDocuments",
+    "filename": "invoice_10257.pdf",
+    "file_type": "PDF",
+    "file_size_bytes": 2094,
+    "dimensions": "596x842",
+    "char_count": 451,
+    "forensic_score": 0.15,
+    "tampering_detected": false,
+    "anomalies": [
+      "Stripped document metadata headers"
+    ],
+    "extracted_fields": [
+      "detected_dates",
+      "issue_date"
+    ]
+  },
+  {
+    "repository": "documents-data",
+    "filename": "15.png",
+    "file_type": "PNG",
+    "file_size_bytes": 168358,
+    "dimensions": "615x795",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "documents-data",
+    "filename": "3.png",
+    "file_type": "PNG",
+    "file_size_bytes": 224135,
+    "dimensions": "333x468",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "documents-data",
+    "filename": "6.png",
+    "file_type": "PNG",
+    "file_size_bytes": 89485,
+    "dimensions": "350x489",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "documents-data",
+    "filename": "8.png",
+    "file_type": "PNG",
+    "file_size_bytes": 76887,
+    "dimensions": "560x531",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "documents-data",
+    "filename": "0.jpg",
+    "file_type": "JPG",
+    "file_size_bytes": 355952,
+    "dimensions": "1000x1333",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "documents-data",
+    "filename": "1.jpg",
+    "file_type": "JPG",
+    "file_size_bytes": 419398,
+    "dimensions": "750x1000",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "documents-data",
+    "filename": "10.jpg",
+    "file_type": "JPG",
+    "file_size_bytes": 315820,
+    "dimensions": "1000x1333",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "documents-data",
+    "filename": "11.jpg",
+    "file_type": "JPG",
+    "file_size_bytes": 4306557,
+    "dimensions": "2974x3996",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "documents-data",
+    "filename": "12.jpg",
+    "file_type": "JPG",
+    "file_size_bytes": 220613,
+    "dimensions": "1000x1333",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "documents-data",
+    "filename": "13.jpg",
+    "file_type": "JPG",
+    "file_size_bytes": 216440,
+    "dimensions": "1000x1333",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_000.png",
+    "file_type": "PNG",
+    "file_size_bytes": 14026,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_001.png",
+    "file_type": "PNG",
+    "file_size_bytes": 14674,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_002.png",
+    "file_type": "PNG",
+    "file_size_bytes": 14243,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_003.png",
+    "file_type": "PNG",
+    "file_size_bytes": 15621,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_004.png",
+    "file_type": "PNG",
+    "file_size_bytes": 13302,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_005.png",
+    "file_type": "PNG",
+    "file_size_bytes": 13137,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_006.png",
+    "file_type": "PNG",
+    "file_size_bytes": 13566,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_007.png",
+    "file_type": "PNG",
+    "file_size_bytes": 14300,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_008.png",
+    "file_type": "PNG",
+    "file_size_bytes": 13813,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  },
+  {
+    "repository": "scan_doc_rotation",
+    "filename": "scan_009.png",
+    "file_type": "PNG",
+    "file_size_bytes": 15608,
+    "dimensions": "300x425",
+    "char_count": 0,
+    "forensic_score": 0.0,
+    "tampering_detected": false,
+    "anomalies": [],
+    "extracted_fields": []
+  }
+]

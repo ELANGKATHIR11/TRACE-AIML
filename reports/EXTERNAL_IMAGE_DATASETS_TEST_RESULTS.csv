@@ -1,0 +1,41 @@
+repository,filename,file_type,file_size_bytes,dimensions,char_count,forensic_score,tampering_detected,anomalies,extracted_fields
+barcode,0.png,PNG,12189223,2268x3024,0,0.0,False,[],[]
+barcode,1.png,PNG,11253856,2268x3024,0,0.0,False,[],[]
+barcode,10.png,PNG,15375428,2268x3024,0,0.0,False,[],[]
+barcode,2.png,PNG,11248011,2268x3024,0,0.0,False,[],[]
+barcode,3.png,PNG,13487799,2268x3024,0,0.0,False,[],[]
+barcode,4.png,PNG,10115056,2268x3024,0,0.0,False,[],[]
+barcode,5.png,PNG,10697463,2268x3024,0,0.0,False,[],[]
+barcode,6.png,PNG,11649255,2268x3024,0,0.0,False,[],[]
+barcode,7.png,PNG,13963711,2268x3024,0,0.0,False,[],[]
+barcode,8.png,PNG,14638017,2268x3024,0,0.0,False,[],[]
+CompanyDocuments,invoice_10248.pdf,PDF,2052,596x842,409,0.15,False,['Stripped document metadata headers'],"['detected_dates', 'issue_date']"
+CompanyDocuments,invoice_10249.pdf,PDF,1986,596x842,358,0.15,False,['Stripped document metadata headers'],"['detected_dates', 'issue_date']"
+CompanyDocuments,invoice_10250.pdf,PDF,2093,596x842,444,0.15,False,['Stripped document metadata headers'],"['detected_dates', 'issue_date']"
+CompanyDocuments,invoice_10251.pdf,PDF,2058,596x842,409,0.15,False,['Stripped document metadata headers'],"['detected_dates', 'issue_date']"
+CompanyDocuments,invoice_10252.pdf,PDF,2058,596x842,416,0.15,False,['Stripped document metadata headers'],"['detected_dates', 'issue_date']"
+CompanyDocuments,invoice_10253.pdf,PDF,2057,596x842,414,0.15,False,['Stripped document metadata headers'],"['detected_dates', 'issue_date']"
+CompanyDocuments,invoice_10254.pdf,PDF,2039,596x842,374,0.15,False,['Stripped document metadata headers'],"['detected_dates', 'issue_date']"
+CompanyDocuments,invoice_10255.pdf,PDF,2084,596x842,398,0.15,False,['Stripped document metadata headers'],['document_id_or_number']
+CompanyDocuments,invoice_10256.pdf,PDF,2016,596x842,380,0.15,False,['Stripped document metadata headers'],"['detected_dates', 'issue_date']"
+CompanyDocuments,invoice_10257.pdf,PDF,2094,596x842,451,0.15,False,['Stripped document metadata headers'],"['detected_dates', 'issue_date']"
+documents-data,15.png,PNG,168358,615x795,0,0.0,False,[],[]
+documents-data,3.png,PNG,224135,333x468,0,0.0,False,[],[]
+documents-data,6.png,PNG,89485,350x489,0,0.0,False,[],[]
+documents-data,8.png,PNG,76887,560x531,0,0.0,False,[],[]
+documents-data,0.jpg,JPG,355952,1000x1333,0,0.0,False,[],[]
+documents-data,1.jpg,JPG,419398,750x1000,0,0.0,False,[],[]
+documents-data,10.jpg,JPG,315820,1000x1333,0,0.0,False,[],[]
+documents-data,11.jpg,JPG,4306557,2974x3996,0,0.0,False,[],[]
+documents-data,12.jpg,JPG,220613,1000x1333,0,0.0,False,[],[]
+documents-data,13.jpg,JPG,216440,1000x1333,0,0.0,False,[],[]
+scan_doc_rotation,scan_000.png,PNG,14026,300x425,0,0.0,False,[],[]
+scan_doc_rotation,scan_001.png,PNG,14674,300x425,0,0.0,False,[],[]
+scan_doc_rotation,scan_002.png,PNG,14243,300x425,0,0.0,False,[],[]
+scan_doc_rotation,scan_003.png,PNG,15621,300x425,0,0.0,False,[],[]
+scan_doc_rotation,scan_004.png,PNG,13302,300x425,0,0.0,False,[],[]
+scan_doc_rotation,scan_005.png,PNG,13137,300x425,0,0.0,False,[],[]
+scan_doc_rotation,scan_006.png,PNG,13566,300x425,0,0.0,False,[],[]
+scan_doc_rotation,scan_007.png,PNG,14300,300x425,0,0.0,False,[],[]
+scan_doc_rotation,scan_008.png,PNG,13813,300x425,0,0.0,False,[],[]
+scan_doc_rotation,scan_009.png,PNG,15608,300x425,0,0.0,False,[],[]
