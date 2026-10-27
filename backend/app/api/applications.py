@@ -1,9 +1,10 @@
+from datetime import datetime, timezone
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models.enums import UserRole
+from app.models.enums import ApplicationStatus, UserRole
 from app.models.models import Application, ChecklistRule, Document, Institution, User
 from app.schemas.schemas import (
     ApplicationCreate,
@@ -285,5 +286,76 @@ def run_autonomous_agent_audit(
         "report_url": report_link,
         "verification_summary": base_result,
         "message": agent_status,
+    }
+
+
+@router.get("/applications/queue/pending-review", response_model=List[Application])
+def get_pending_review_queue(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_roles([UserRole.REVIEWER, UserRole.ADMIN])),
+):
+    """
+    Officer review queue: lists all applications requiring statutory determination.
+    """
+    statement = select(Application).where(
+        Application.status.in_([
+            ApplicationStatus.READY_FOR_REVIEW,
+            ApplicationStatus.PENDING_HUMAN_REVIEW,
+            ApplicationStatus.DEFICIENCY_FLAGGED,
+            ApplicationStatus.SUBMITTED,
+        ])
+    )
+    return session.exec(statement).all()
+
+
+@router.post("/applications/{application_id}/decision")
+def record_officer_determination(
+    application_id: int,
+    action: str,  # APPROVE, REJECT, REQUEST_CORRECTION, ESCALATE
+    officer_notes: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_roles([UserRole.REVIEWER, UserRole.ADMIN])),
+):
+    """
+    Records an authorized human-in-the-loop regulatory determination.
+    AI agents are strictly advisory; final approval or rejection requires an authorized officer.
+    """
+    application = session.get(Application, application_id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    action_normalized = action.upper().strip()
+    if action_normalized == "APPROVE":
+        application.status = ApplicationStatus.APPROVED_BY_REVIEWER
+    elif action_normalized == "REJECT":
+        application.status = ApplicationStatus.REJECTED_BY_REVIEWER
+    elif action_normalized == "REQUEST_CORRECTION":
+        application.status = ApplicationStatus.RECTIFICATION_REQUESTED
+    elif action_normalized == "ESCALATE":
+        application.status = ApplicationStatus.PENDING_HUMAN_REVIEW
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid action '{action}'. Permitted: APPROVE, REJECT, REQUEST_CORRECTION, ESCALATE")
+
+    session.add(application)
+    session.commit()
+    session.refresh(application)
+
+    log_audit_event(
+        session,
+        application_id=application.id,
+        action_type=f"OFFICER_DECISION_{action_normalized}",
+        entity_type="Application",
+        entity_id=application.application_number,
+        actor=current_user,
+        summary=f"Officer '{current_user.email}' issued '{action_normalized}' decision on {application.application_number}.",
+        details={"action": action_normalized, "officer_notes": officer_notes},
+    )
+
+    return {
+        "message": f"Officer decision recorded successfully: {action_normalized}",
+        "application_number": application.application_number,
+        "new_status": application.status.value,
+        "officer": current_user.email,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 

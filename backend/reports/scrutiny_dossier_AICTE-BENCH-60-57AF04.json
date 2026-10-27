@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "generated_at": "2026-10-27T08:49:07.360266+00:00",
+    "system": "AICTE TRACE Autonomous Verification Platform (SIH26261)",
+    "runtime": "100% Offline Sovereign AI",
+    "application_id": 8,
+    "application_number": "AICTE-BENCH-60-57AF04",
+    "academic_year": "2026-27",
+    "category": "EOA",
+    "institution_id": null
+  },
+  "declared_parameters": {},
+  "historical_baseline": {},
+  "total_flags_count": 1,
+  "flags": [
+    {
+      "id": 1,
+      "severity": "HIGH",
+      "category": "POTENTIAL_FORGERY_OR_ALTERATION",
+      "reason": "Canva footprint detected",
+      "evidence": "Software: Canva"
+    }
+  ],
+  "disposition": "PENDING_HUMAN_REVIEW"
+}
