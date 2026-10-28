@@ -11,7 +11,10 @@ export function formatApiValue(v: unknown, unit?: string): string {
 
 export function formatApiTimestamp(v: string | null | undefined): string {
   if (v === null || v === undefined || v === '') return NOT_PROVIDED;
-  const d = new Date(v);
+  // Naive backend datetimes are UTC but serialize without a zone; Date would read them as local time.
+  const hasTime = /[T ]\d{2}:\d{2}/.test(v);
+  const hasZone = /(Z|[+-]\d{2}:?\d{2})$/i.test(v);
+  const d = new Date(hasTime && !hasZone ? `${v.replace(' ', 'T')}Z` : v);
   if (Number.isNaN(d.getTime())) return v;
   return `${d.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 }

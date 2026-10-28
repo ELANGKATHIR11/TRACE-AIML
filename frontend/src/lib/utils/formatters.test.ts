@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   formatApiTimestamp,
   formatApiValue,
@@ -27,6 +27,25 @@ describe('formatApiValue', () => {
 });
 
 describe('formatApiTimestamp', () => {
+  // Date reads process.env.TZ lazily, so setting it here (non-UTC zone, +05:30)
+  // makes the zone-less cases fail on the old local-time parsing on any machine.
+  const originalTz = process.env.TZ;
+  beforeAll(() => {
+    process.env.TZ = 'Asia/Kolkata';
+  });
+  afterAll(() => {
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+  });
+  it('treats zone-less timestamps as UTC', () => {
+    expect(formatApiTimestamp('2026-10-28T10:15:00')).toBe('2026-10-28 10:15:00 UTC');
+    expect(formatApiTimestamp('2026-10-28T10:15:00.123456')).toBe('2026-10-28 10:15:00 UTC');
+    expect(formatApiTimestamp('2026-10-28 10:15:00')).toBe('2026-10-28 10:15:00 UTC');
+  });
+  it('converts explicit offsets to UTC', () => {
+    expect(formatApiTimestamp('2026-10-28T10:15:00+05:30')).toBe('2026-10-28 04:45:00 UTC');
+    expect(formatApiTimestamp('2026-10-28T10:15:00-0200')).toBe('2026-10-28 12:15:00 UTC');
+  });
   it('handles missing and invalid', () => {
     expect(formatApiTimestamp(null)).toBe(NA);
     expect(formatApiTimestamp(undefined)).toBe(NA);
