@@ -151,3 +151,39 @@ def test_revoke_all_for_user(session):
     tokens.revoke_all_for_user(session, user.id)
     rows = session.exec(select(RefreshToken)).all()
     assert rows and all(r.revoked_at is not None for r in rows)
+
+
+def test_sequential_rotations_leave_exactly_one_live_token(session):
+    user = make_user(session, "applicant")
+    raw1, row1 = tokens.issue_refresh_token(session, user)
+    _, raw2, _ = tokens.rotate_refresh_token(session, raw1)
+    _, raw3, _ = tokens.rotate_refresh_token(session, raw2)
+    rows = session.exec(select(RefreshToken).where(RefreshToken.family_id == row1.family_id)).all()
+    assert len(rows) == 3  # one successor per successful rotation
+    live = [r for r in rows if r.revoked_at is None and r.replaced_by_id is None]
+    assert len(live) == 1
+
+
+def test_guarded_update_rejects_already_claimed_row(session, monkeypatch):
+    user = make_user(session, "applicant")
+    raw1, row1 = tokens.issue_refresh_token(session, user)
+    family = row1.family_id
+
+    # Simulate the race: right after the check passes, a concurrent request claims the row.
+    real_update = tokens.sa_update
+    def racing_update(*a, **k):
+        from sqlalchemy import update
+        session.execute(update(RefreshToken).where(RefreshToken.id == row1.id).values(revoked_at=tokens.utc_now()))
+        monkeypatch.setattr(tokens, "sa_update", real_update)
+        return real_update(*a, **k)
+    monkeypatch.setattr(tokens, "sa_update", racing_update)
+
+    with pytest.raises(RefreshTokenError):
+        tokens.rotate_refresh_token(session, raw1)
+    session.expire_all()
+    rows = session.exec(select(RefreshToken).where(RefreshToken.family_id == family)).all()
+    assert len(rows) == 1  # no successor minted
+    assert all(r.revoked_at is not None for r in rows)
+    assert session.exec(
+        select(AuditLog).where(AuditLog.action_type == "REFRESH_TOKEN_REUSE_DETECTED")
+    ).all()

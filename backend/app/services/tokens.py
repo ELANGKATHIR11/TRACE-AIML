@@ -6,6 +6,7 @@ from typing import Optional
 from uuid import uuid4
 
 import jwt
+from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -71,6 +72,8 @@ def issue_refresh_token(
     user: User,
     family_id: Optional[str] = None,
     family_expires_at: Optional[datetime] = None,
+    *,
+    commit: bool = True,
 ) -> tuple[str, RefreshToken]:
     now = utc_now()
     raw = secrets.token_urlsafe(32)
@@ -82,8 +85,11 @@ def issue_refresh_token(
         expires_at=family_expires_at or now + timedelta(hours=settings.REFRESH_TOKEN_EXPIRE_HOURS),
     )
     session.add(row)
-    session.commit()
-    session.refresh(row)
+    if commit:
+        session.commit()
+        session.refresh(row)
+    else:
+        session.flush()
     return raw, row
 
 
@@ -117,6 +123,21 @@ def revoke_all_for_user(session: Session, user_id: int) -> None:
     session.commit()
 
 
+def _reuse_detected(session: Session, row: RefreshToken, user: Optional[User]) -> RefreshTokenError:
+    _revoke_family_rows(session, row.family_id)
+    session.commit()
+    log_audit_event(
+        session,
+        action_type="REFRESH_TOKEN_REUSE_DETECTED",
+        entity_type="User",
+        entity_id=str(row.user_id),
+        summary="Revoked or replaced refresh token presented again; token family revoked",
+        actor=user,
+        details={"family_id": row.family_id},
+    )
+    return RefreshTokenError("Refresh token reuse detected")
+
+
 def rotate_refresh_token(session: Session, raw: str) -> tuple[User, str, RefreshToken]:
     row = session.exec(select(RefreshToken).where(RefreshToken.token_hash == _hash(raw))).first()
     if row is None:
@@ -125,30 +146,33 @@ def rotate_refresh_token(session: Session, raw: str) -> tuple[User, str, Refresh
     user = session.get(User, row.user_id)
 
     if row.revoked_at is not None or row.replaced_by_id is not None:
-        _revoke_family_rows(session, row.family_id)
-        session.commit()
-        log_audit_event(
-            session,
-            action_type="REFRESH_TOKEN_REUSE_DETECTED",
-            entity_type="User",
-            entity_id=str(row.user_id),
-            summary="Revoked or replaced refresh token presented again; token family revoked",
-            actor=user,
-            details={"family_id": row.family_id},
-        )
-        raise RefreshTokenError("Refresh token reuse detected")
-
+        raise _reuse_detected(session, row, user)
     if as_utc(row.expires_at) <= utc_now():
         raise RefreshTokenError("Refresh token expired")
     if user is None or not user.is_active:
         raise RefreshTokenError("User inactive")
 
-    new_raw, new_row = issue_refresh_token(
-        session, user, family_id=row.family_id, family_expires_at=as_utc(row.expires_at)
+    # Atomically claim the old row; a concurrent rotation that got there first
+    # leaves rowcount 0, which is treated as reuse.
+    claimed = session.execute(
+        sa_update(RefreshToken)
+        .where(
+            RefreshToken.id == row.id,
+            RefreshToken.revoked_at.is_(None),
+            RefreshToken.replaced_by_id.is_(None),
+        )
+        .values(revoked_at=utc_now())
     )
-    row.revoked_at = utc_now()
-    row.replaced_by_id = new_row.id
-    session.add(row)
+    if claimed.rowcount != 1:
+        session.rollback()
+        raise _reuse_detected(session, row, user)
+
+    new_raw, new_row = issue_refresh_token(
+        session, user, family_id=row.family_id, family_expires_at=as_utc(row.expires_at), commit=False
+    )
+    session.execute(
+        sa_update(RefreshToken).where(RefreshToken.id == row.id).values(replaced_by_id=new_row.id)
+    )
     session.commit()
     session.refresh(new_row)
     return user, new_raw, new_row
