@@ -185,6 +185,12 @@ export function submitApplicationRectification(
   });
 }
 
+export function validateApplication(id: Id): Promise<{ message: string; result: unknown }> {
+  return apiRequest<{ message: string; result: unknown }>(`/api/applications/${id}/validate`, {
+    method: 'POST',
+  });
+}
+
 export function triggerAgentReview(id: Id): Promise<AgentReviewResponse> {
   return apiRequest<AgentReviewResponse>(`/api/applications/${id}/agent-review`, {
     method: 'POST',

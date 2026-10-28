@@ -193,6 +193,20 @@ def test_agent_review_does_not_change_status(client, session, headers, reviewer,
     assert application.status == ApplicationStatus.SUBMITTED
 
 
+def test_agent_review_503_when_ai_stack_not_importable(client, session, headers, reviewer, inst_a, make_application, monkeypatch):
+    import sys
+
+    # A missing optional dependency (e.g. chromadb) makes the capability unavailable, not a 500.
+    monkeypatch.setitem(sys.modules, "app.services.multi_agent_workflow", None)
+    application = make_application(session, inst_a, status=ApplicationStatus.SUBMITTED)
+
+    r = client.post(f"/api/applications/{application.id}/agent-review", headers=headers(reviewer))
+    assert r.status_code == 503, r.text
+    assert r.json()["detail"] == "AI review unavailable"
+    session.refresh(application)
+    assert application.status == ApplicationStatus.SUBMITTED
+
+
 def test_unknown_decision_422(client, session, headers, reviewer, inst_a, make_application):
     application = make_application(session, inst_a, status=ApplicationStatus.READY_FOR_REVIEW)
     for decision in ("APPROVED", "MAYBE", "DEFICIENCY_FLAGGED"):

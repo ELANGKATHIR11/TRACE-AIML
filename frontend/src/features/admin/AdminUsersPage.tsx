@@ -19,6 +19,13 @@ import type { Role } from '../../lib/permissions/roles';
 const ROLES: Role[] = ['applicant', 'reviewer', 'admin'];
 const USERS_KEY = ['admin-users'];
 const FIELD_CLASS = 'w-full px-3 py-2 text-xs bg-[#F4F6F9] border border-[#CBD5E1] text-[#0F1E36]';
+// reset() with a partial object leaves text inputs untouched, so spell out every field.
+const EMPTY_FORM = {
+  email: '',
+  full_name: '',
+  role: 'reviewer',
+  temporary_password: '',
+} as unknown as AdminUserFormValues;
 const FORM_FIELDS = ['email', 'full_name', 'role', 'institution_id', 'temporary_password'] as const;
 
 function FieldError({ message }: { message?: string }) {
@@ -176,7 +183,7 @@ export function AdminUsersPage() {
     formState: { errors },
   } = useForm<AdminUserFormValues>({
     resolver: zodResolver(AdminUserFormSchema),
-    defaultValues: { role: 'reviewer' },
+    defaultValues: EMPTY_FORM,
   });
   const selectedRole = watch('role');
 
@@ -184,7 +191,7 @@ export function AdminUsersPage() {
     mutationFn: (values: AdminUserFormValues) => createUser(values),
     retry: false,
     onSuccess: () => {
-      reset({ role: 'reviewer' });
+      reset(EMPTY_FORM);
       void queryClient.invalidateQueries({ queryKey: USERS_KEY });
     },
     onError: (err) => {

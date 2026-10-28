@@ -163,8 +163,13 @@ def agent_review(
     app_obj = load_application(session, application_id, current_user)
     workflow.ensure_status(app_obj, workflow.REVIEWABLE, "run an AI review on")
 
-    from app.services.multi_agent_workflow import multi_agent_workflow_service
     from app.services.audit_service import log_audit_event
+
+    try:
+        from app.services.multi_agent_workflow import multi_agent_workflow_service
+    except ImportError:
+        # Optional AI dependencies (vector store / agent framework) are not installed.
+        raise HTTPException(status_code=503, detail="AI review unavailable")
 
     if not multi_agent_workflow_service.is_available():
         raise HTTPException(status_code=503, detail="AI review unavailable")

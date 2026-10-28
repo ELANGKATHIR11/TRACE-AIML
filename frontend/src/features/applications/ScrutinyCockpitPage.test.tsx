@@ -1,6 +1,7 @@
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 
 vi.mock('../../lib/api/endpoints', () => ({
@@ -11,6 +12,7 @@ vi.mock('../../lib/api/endpoints', () => ({
   fetchAuthorityVerifications: vi.fn(),
   submitOfficerDecision: vi.fn(),
   triggerAgentReview: vi.fn(),
+  validateApplication: vi.fn(),
 }));
 vi.mock('../documents/EvidenceCanvasViewer', () => ({
   EvidenceCanvasViewer: () => <div data-testid="viewer" />,
@@ -62,6 +64,33 @@ describe('ScrutinyCockpitPage decision form', () => {
     expect(screen.queryByLabelText(/binding statutory determination/i)).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: /record binding statutory decision/i }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe('ScrutinyCockpitPage validation trigger', () => {
+  it('lets a reviewer run validation on a submitted dossier', async () => {
+    api.fetchApplicationDetail.mockResolvedValue({
+      id: 5,
+      status: 'SUBMITTED',
+      documents: [],
+    } as never);
+    api.validateApplication.mockResolvedValue({ message: 'ok', result: {} } as never);
+    renderCockpit('reviewer');
+    await userEvent.click(await screen.findByRole('button', { name: /run statutory validation/i }));
+    await waitFor(() => expect(api.validateApplication).toHaveBeenCalledWith('5'));
+  });
+
+  it('does not offer validation once a decision has been recorded', async () => {
+    api.fetchApplicationDetail.mockResolvedValue({
+      id: 5,
+      status: 'APPROVED_BY_REVIEWER',
+      documents: [],
+    } as never);
+    renderCockpit('reviewer');
+    await screen.findByLabelText(/binding statutory determination/i);
+    expect(
+      screen.queryByRole('button', { name: /run statutory validation/i }),
     ).not.toBeInTheDocument();
   });
 });

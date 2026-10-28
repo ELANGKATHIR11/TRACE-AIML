@@ -77,6 +77,11 @@ describe('AdminUsersPage', () => {
       institution_id: 7,
       temporary_password: 'a-long-temp-password',
     });
+
+    // The form (including the temporary password) is cleared after a successful create.
+    await waitFor(() => expect(screen.getByLabelText(/^email/i)).toHaveValue(''));
+    expect(screen.getByLabelText(/full name/i)).toHaveValue('');
+    expect(screen.getByLabelText(/temporary password/i)).toHaveValue('');
   });
 
   it('deactivates a user', async () => {

@@ -25,6 +25,7 @@ import {
   fetchAuthorityVerifications,
   submitOfficerDecision,
   triggerAgentReview,
+  validateApplication,
 } from '../../lib/api/endpoints';
 import {
   OfficerDecisionFormSchema,
@@ -49,6 +50,9 @@ import { DossierStack3D, Tactile3DCard } from '../../components/Tactile3DElement
 import { useAuth } from '../auth/AuthContext';
 import { EvidenceCanvasViewer } from '../documents/EvidenceCanvasViewer';
 import { verificationDetail } from './verificationDisplay';
+
+// Statuses from which POST /validate is accepted (spec §6.1).
+const VALIDATABLE_STATUSES: string[] = ['SUBMITTED', 'READY_FOR_REVIEW', 'DEFICIENCY_FLAGGED'];
 
 export function ScrutinyCockpitPage() {
   const { id } = useParams<{ id: string }>();
@@ -88,6 +92,14 @@ export function ScrutinyCockpitPage() {
     retry: false,
     onSuccess: () => {
       invalidateAllAppQueries(queryClient, { applicationId, reason: 'AGENT_REVIEW_COMPLETED' });
+    },
+  });
+
+  const validateMutation = useMutation({
+    mutationFn: () => validateApplication(applicationId),
+    retry: false,
+    onSuccess: () => {
+      invalidateAllAppQueries(queryClient, { applicationId, reason: 'VALIDATION_COMPLETED' });
     },
   });
 
@@ -230,6 +242,23 @@ export function ScrutinyCockpitPage() {
 
           <div className="flex items-center gap-2.5">
             {appDetail && <StatusIndicator value={appDetail.status} />}
+            {appDetail && VALIDATABLE_STATUSES.includes(appDetail.status ?? '') && (
+              <button
+                type="button"
+                onClick={() => validateMutation.mutate()}
+                disabled={validateMutation.isPending}
+                className="btn-tactile-3d inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#1B365D] border border-[#1B365D] hover:bg-[#0F1E36] whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+              >
+                <span>
+                  {validateMutation.isPending ? 'Validating...' : 'Run Statutory Validation'}
+                </span>
+              </button>
+            )}
+            {validateMutation.isError && (
+              <span role="alert" className="text-xs text-red-700">
+                Validation failed: {validateMutation.error.message}
+              </span>
+            )}
             <button
               type="button"
               onClick={() => {
