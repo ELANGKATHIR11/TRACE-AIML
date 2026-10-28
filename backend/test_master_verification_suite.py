@@ -21,7 +21,7 @@ from app.database import get_session
 from app.main import app
 from app.models.enums import ApplicationCategory, DocumentType, UserRole
 from app.models.models import Application, Institution, User
-from app.services.audit_service import audit_service, log_audit_event
+from app.services.audit_service import log_audit_event, verify_chain
 from app.services.ml_training_platform import ml_training_platform
 from app.services.production_security import production_security
 from app.services.security import create_access_token, hash_password
@@ -151,13 +151,13 @@ def test_tamper_evident_merkle_chain():
     SQLModel.metadata.create_all(test_engine)
 
     with Session(test_engine) as session:
-        log1 = audit_service.log_action(session, "DOC_UPLOAD", "Document", "Doc 1 uploaded", application_id=1)
-        log2 = audit_service.log_action(session, "RULE_EVAL", "Rule", "Rule 1 evaluated", application_id=1)
-        log3 = audit_service.log_action(session, "VERIFIED", "Application", "Application verified", application_id=1)
+        log_audit_event(session, action_type="DOC_UPLOAD", entity_type="Document", summary="Doc 1 uploaded", application_id=1)
+        log_audit_event(session, action_type="RULE_EVAL", entity_type="Rule", summary="Rule 1 evaluated", application_id=1)
+        log_audit_event(session, action_type="VERIFIED", entity_type="Application", summary="Application verified", application_id=1)
 
-        verification = audit_service.verify_audit_chain(session)
-        assert verification["is_valid"] is True
-        assert verification["total_records"] == 3
+        verification = verify_chain(session)
+        assert verification["status"] == "INTACT"
+        assert verification["verified_count"] == 3
 
 
 def test_offline_aes256_gcm_storage_and_decryption():

@@ -288,7 +288,7 @@ def submit_officer_decision(
     session.refresh(app_record)
 
     # Log to cryptographic audit trail
-    log_audit_event(
+    audit_entry = log_audit_event(
         session,
         application_id=app_record.id,
         action_type=f"OFFICER_DECISION_{decision}",
@@ -306,6 +306,6 @@ def submit_officer_decision(
         "status": app_record.status.value,
         "officer_notes": notes,
         "decided_at": app_record.updated_at.isoformat(),
-        "audit_hash": f"sha256:{hash(str(app_record.id) + decision)}",
+        "audit_hash": audit_entry.record_hash,
     }
 

@@ -14,7 +14,7 @@ from app.models.enums import DocumentType, VerificationStatus
 from app.models.models import Document, User
 from app.schemas.schemas import DocumentRead, DocumentUploadResponse
 from app.services.access import load_application, load_document, require_applicant, require_staff
-from app.services.audit_service import audit_service
+from app.services.audit_service import log_audit_event
 from app.services.document_storage import (
     content_disposition_inline,
     ela_on_bytes,
@@ -104,13 +104,13 @@ async def upload_document(
         select(Document).where(Document.sha256_hash == sha256).where(Document.application_id != application_id)
     ).first()
     if duplicate_doc:
-        audit_service.log_action(
+        log_audit_event(
             db,
             action_type="DUPLICATE_DOCUMENT_FLAGGED",
             entity_type="Document",
             entity_id=str(duplicate_doc.id),
             summary=f"Security Alert: Document {file.filename} is identical to document in Application #{duplicate_doc.application_id}",
-            actor_user_id=current_user.id,
+            actor=current_user,
             application_id=application_id,
             details={"duplicate_of_app": duplicate_doc.application_id, "sha256": sha256},
         )
@@ -130,13 +130,13 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
 
-    audit_service.log_action(
+    log_audit_event(
         db,
         action_type="DOCUMENT_UPLOADED",
         entity_type="Document",
         entity_id=str(doc.id),
         summary=f"Uploaded {file.filename} for Application #{application_id} (SHA-256: {sha256[:12]}...)",
-        actor_user_id=current_user.id,
+        actor=current_user,
         application_id=application_id,
         details={"filename": file.filename, "size_bytes": file_size, "sha256": sha256},
     )

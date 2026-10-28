@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 
 from app.models.enums import ApplicationStatus, FlagCategory, FlagSeverity, VerificationStatus
 from app.models.models import Application, ChecklistRule, Document, ValidationFlag
-from app.services.audit_service import audit_service
+from app.services.audit_service import log_audit_event
 from app.services.document_storage import ela_on_bytes, read_document_plaintext
 from app.services.AI_service import gemini_service
 from app.services.ocr_service import ocr_service
@@ -131,7 +131,7 @@ class VerificationService:
         db.commit()
         db.refresh(document)
 
-        audit_service.log_action(
+        log_audit_event(
             db,
             action_type="DOCUMENT_VERIFIED",
             entity_type="Document",
@@ -196,7 +196,7 @@ class VerificationService:
         db.commit()
         db.refresh(application)
 
-        audit_service.log_action(
+        log_audit_event(
             db,
             action_type="APPLICATION_VALIDATION_COMPLETED",
             entity_type="Application",

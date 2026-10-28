@@ -4,11 +4,17 @@ from sqlmodel import Session, create_engine, select
 
 from app.config import settings
 from app.models.enums import ApplicationCategory, DocumentType
-from app.models.models import AuditLog, ChecklistRule, Institution
+from app.models.models import ChecklistRule, Institution
+from app.services.audit_service import log_audit_event
 
 
 def _build_engine(url: str) -> Engine:
-    connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
+    # SQLite: `timeout` makes a writer wait (up to 30 s) for the database write lock instead of
+    # failing immediately with "database is locked" — audit appends take that lock with
+    # BEGIN IMMEDIATE (see audit_service._lock_chain). pysqlite's default transaction handling
+    # is kept deliberately: it only opens a transaction before DML, so plain reads never hold
+    # a SHARED lock across a request and cannot block other connections' commits.
+    connect_args = {"check_same_thread": False, "timeout": 30} if url.startswith("sqlite") else {}
     return create_engine(url, echo=False, connect_args=connect_args)
 
 
@@ -160,13 +166,10 @@ def seed_reference_data(session: Session) -> None:
         session.add_all(default_rules)
         session.commit()
 
-        session.add(
-            AuditLog(
-                actor_role="SYSTEM",
-                action_type="SYSTEM_SEEDED",
-                entity_type="ChecklistRule",
-                summary="Initialized AICTE Approval Process Handbook 2026-27 checklist rules.",
-                details={"rules_seeded": len(default_rules)},
-            )
+        log_audit_event(
+            session,
+            action_type="SYSTEM_SEEDED",
+            entity_type="ChecklistRule",
+            summary="Initialized AICTE Approval Process Handbook 2026-27 checklist rules.",
+            details={"rules_seeded": len(default_rules)},
         )
-        session.commit()

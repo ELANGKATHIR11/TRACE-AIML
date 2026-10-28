@@ -217,3 +217,7 @@ class AuditLog(SQLModel, table=True):
     summary: str
     details: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     timestamp: datetime = Field(default_factory=utc_now, index=True)
+    # HMAC chain (spec §5.4): written only by audit_service.log_audit_event. record_hash is
+    # NULL only transiently, between the insert flush (which assigns `id`) and the commit.
+    prev_hash: str = Field(max_length=64)
+    record_hash: Optional[str] = Field(default=None, max_length=64)
