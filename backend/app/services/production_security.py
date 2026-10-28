@@ -1,6 +1,6 @@
 """Production-Grade Security & Cryptographic Integrity Suite for AICTE TRACE Platform.
 Implements:
-1. AES-256-GCM authenticated document encryption/decryption at rest.
+1. (Document encryption lives in app.services.document_storage.)
 2. File magic-byte sanitization (disarming polyglot attacks, shellcode, zip bombs).
 3. Aadhaar / PAN PII redaction and deterministic masking.
 4. Cryptographic SHA-256 Merkle-style tamper-evident audit chaining.
@@ -19,43 +19,16 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from PIL import Image
 
 from app.config import settings
-
-# Dedicated file-encryption key (32 bytes for AES-256), independent of SECRET_KEY
-aesgcm = AESGCM(settings.file_encryption_key_bytes)
 
 
 class ProductionSecurityService:
     """Enterprise-grade security controls complying with NIC/CERT-In standards."""
 
     # -------------------------------------------------------------------------
-    # 1. AES-256-GCM Authenticated Encryption for Stored Statutory Documents
-    # -------------------------------------------------------------------------
-    @staticmethod
-    def encrypt_file_data(data: bytes, associated_metadata: str = "AICTE-DOSSIER-V1") -> bytes:
-        """
-        Encrypts document bytes using authenticated AES-256-GCM.
-        Generates a 96-bit (12-byte) random nonce per file.
-        Output format: Nonce (12 bytes) + Ciphertext + Auth Tag (16 bytes).
-        """
-        nonce = os.urandom(12)
-        ciphertext = aesgcm.encrypt(nonce, data, associated_metadata.encode("utf-8"))
-        return nonce + ciphertext
-
-    @staticmethod
-    def decrypt_file_data(encrypted_data: bytes, associated_metadata: str = "AICTE-DOSSIER-V1") -> bytes:
-        """Decrypts and verifies authentication tag of stored AES-256-GCM payload."""
-        if len(encrypted_data) < 28:
-            raise ValueError("Invalid encrypted payload length")
-        nonce = encrypted_data[:12]
-        ciphertext = encrypted_data[12:]
-        return aesgcm.decrypt(nonce, ciphertext, associated_metadata.encode("utf-8"))
-
-    # -------------------------------------------------------------------------
-    # 2. File Magic-Byte & Polyglot Sanitization
+    # 1. File Magic-Byte & Polyglot Sanitization
     # -------------------------------------------------------------------------
     @staticmethod
     def sanitize_uploaded_document(file_bytes: bytes, original_filename: str) -> Dict[str, Any]:

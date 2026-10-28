@@ -162,21 +162,23 @@ def test_tamper_evident_merkle_chain():
 
 def test_offline_aes256_gcm_storage_and_decryption():
     """Test AES-256-GCM encryption with authentic authentication tag verification."""
-    original_data = b"CONFIDENTIAL AICTE ACCREDITATION RECORD 2026"
-    meta = "APP-101"
+    from app.services.document_storage import decrypt_document, encrypt_document
 
-    encrypted = production_security.encrypt_file_data(original_data, associated_metadata=meta)
+    original_data = b"CONFIDENTIAL AICTE ACCREDITATION RECORD 2026"
+    app_id = 101
+
+    encrypted = encrypt_document(original_data, app_id)
     assert encrypted != original_data
     assert len(encrypted) > len(original_data)
 
-    decrypted = production_security.decrypt_file_data(encrypted, associated_metadata=meta)
+    decrypted = decrypt_document(encrypted, app_id)
     assert decrypted == original_data
 
     # Test tampering authentication failure
     tampered_encrypted = bytearray(encrypted)
     tampered_encrypted[-1] ^= 0xFF
     with pytest.raises(Exception):
-        production_security.decrypt_file_data(bytes(tampered_encrypted), associated_metadata=meta)
+        decrypt_document(bytes(tampered_encrypted), app_id)
 
 
 def test_vector_rag_retrieval():

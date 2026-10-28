@@ -2,12 +2,10 @@
 Handles file ingestion, hashing, MIME validation, instant offline processing, and status tracking.
 """
 
-import hashlib
-import shutil
-from pathlib import Path
-from typing import List, Optional
+import logging
+from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -17,8 +15,17 @@ from app.models.models import Document, User
 from app.schemas.schemas import DocumentRead, DocumentUploadResponse
 from app.services.access import load_application, load_document, require_applicant, require_staff
 from app.services.audit_service import audit_service
+from app.services.document_storage import (
+    content_disposition_inline,
+    ela_on_bytes,
+    read_document_plaintext,
+    read_upload_limited,
+    store_document,
+)
 from app.services.security import get_current_user
 from app.services.verification_services import verification_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
@@ -82,14 +89,15 @@ async def upload_document(
     load_application(db, application_id, current_user, write=True)
     doc_type_enum = parse_document_type(document_type)
 
-    # Read bytes
-    contents = await file.read()
-    
-    # 1. Production Magic-Byte and Polyglot Payload Sanitization
-    from app.services.production_security import production_security
-    sanitized_meta = production_security.sanitize_uploaded_document(contents, file.filename or "doc.pdf")
+    contents = await read_upload_limited(file, settings.MAX_UPLOAD_MB * 2**20)
+
+    # Magic-byte/polyglot sanitisation (422 on failure), AES-256-GCM encryption and write to disk
+    target_path, sanitized_meta = store_document(
+        application_id, doc_type_enum, contents, file.filename or "doc.pdf"
+    )
     sha256 = sanitized_meta["sha256_digest"]
     file_size = sanitized_meta["size_bytes"]
+    safe_filename = target_path.name
 
     # 2. Check for duplicate cross-application document recycling (Ghost Document detection)
     duplicate_doc = db.exec(
@@ -106,18 +114,6 @@ async def upload_document(
             application_id=application_id,
             details={"duplicate_of_app": duplicate_doc.application_id, "sha256": sha256},
         )
-
-    # 3. Encrypt data at rest using AES-256-GCM before saving to disk
-    encrypted_bytes = production_security.encrypt_file_data(contents, associated_metadata=f"APP-{application_id}")
-
-    # Save to disk
-    save_dir = settings.UPLOAD_DIR / f"app_{application_id}"
-    save_dir.mkdir(parents=True, exist_ok=True)
-    safe_filename = f"{doc_type_enum.value.lower()}_{sha256[:10]}_{sanitized_meta['sanitized_filename']}"
-    target_path = save_dir / safe_filename
-
-    with open(target_path, "wb") as f:
-        f.write(encrypted_bytes)
 
     # Persist Document entity
     doc = Document(
@@ -188,31 +184,26 @@ def list_application_documents(
 @router.get("/{document_id}/preview")
 def get_document_preview(
     document_id: int,
-    page: int = 1,
-    mark: Optional[List[str]] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Return forensic document preview with optional vector bounding box highlights.
-    """
-    from fastapi.responses import FileResponse, JSONResponse
+    """Return the decrypted document inline."""
     doc = load_document(db, document_id, current_user)
-
-    file_p = Path(doc.file_path)
-    if file_p.exists():
-        # Check if decrypt is needed or return file directly
-        return FileResponse(file_p, media_type=doc.mime_type, filename=doc.filename)
-
-    return JSONResponse(
-        content={
-            "document_id": document_id,
-            "filename": doc.filename,
-            "page": page,
-            "status": "PREVIEW_READY",
-            "bounding_boxes": [],
-            "matches": mark or [],
-        }
+    try:
+        plaintext = read_document_plaintext(doc)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Document file not found")
+    except ValueError:
+        logger.error("Document %s failed decryption", doc.id)
+        raise HTTPException(status_code=500, detail="Stored document could not be read")
+    return Response(
+        content=plaintext,
+        media_type=doc.mime_type,
+        headers={
+            "Content-Disposition": content_disposition_inline(doc.filename),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -222,36 +213,39 @@ def get_document_ela(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
-    """
-    Execute Error Level Analysis (ELA) to detect JPEG resave splices, cloned seals, and tampered digits.
-    """
+    """Execute Error Level Analysis (ELA) on the decrypted image to detect resave splices and tampering."""
     doc = load_document(db, document_id, current_user)
 
-    from app.services.image_forensics_service import ImageForensicsService
-    file_p = Path(doc.file_path)
+    if doc.mime_type not in ("image/png", "image/jpeg"):
+        return {
+            "document_id": document_id,
+            "tampering_detected": False,
+            "anomaly_score": 0.0,
+            "details": "Document is not a raster PNG/JPEG image. ELA does not apply.",
+        }
 
-    if file_p.exists() and file_p.suffix.lower() in [".jpg", ".jpeg", ".png"]:
-        try:
-            ela_res = ImageForensicsService.perform_error_level_analysis(file_p)
-            return {
-                "document_id": document_id,
-                "tampering_detected": ela_res.get("tamper_anomaly_detected", False),
-                "anomaly_score": ela_res.get("tamper_anomaly_score", 0.0),
-                "details": "Error Level Analysis computed across DCT blocks.",
-                "max_difference": ela_res.get("max_error", 0.0),
-            }
-        except Exception as e:
-            return {
-                "document_id": document_id,
-                "tampering_detected": False,
-                "anomaly_score": 0.0,
-                "details": f"ELA processing: {str(e)}",
-            }
+    try:
+        plaintext = read_document_plaintext(doc)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Document file not found")
+    except ValueError:
+        logger.error("Document %s failed decryption", doc.id)
+        raise HTTPException(status_code=500, detail="Stored document could not be read")
 
+    try:
+        ela_res = ela_on_bytes(plaintext, doc.mime_type)
+    except Exception:
+        logger.exception("ELA failed for document %s", doc.id)
+        return {
+            "document_id": document_id,
+            "tampering_detected": False,
+            "anomaly_score": 0.0,
+            "details": "Error Level Analysis could not be computed for this image.",
+        }
     return {
         "document_id": document_id,
-        "tampering_detected": False,
-        "anomaly_score": 0.0,
-        "details": "Document is PDF or not a raster JPEG image. ELA standard baseline passed.",
+        "tampering_detected": ela_res.get("tamper_detected_by_ela", False),
+        "anomaly_score": ela_res.get("std_compression_error", 0.0),
+        "details": ela_res.get("reason", "Error Level Analysis computed across DCT blocks."),
+        "max_difference": ela_res.get("max_compression_error", 0.0),
     }
-

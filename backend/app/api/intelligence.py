@@ -8,9 +8,11 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.database import get_session
 from app.models.models import User
 from app.services.access import load_application, require_staff
+from app.services.document_storage import read_upload_limited
 
 router = APIRouter(prefix="/api", tags=["AI, ML & Intake Tools"])
 
@@ -97,11 +99,9 @@ async def inspect_media(
     """Analyse a floor plan / photo / walkthrough video without attaching it to an application."""
     from app.services.multi_source_ingestion import multi_source_ingestion
 
-    contents = await file.read()
+    contents = await read_upload_limited(file, 50 * 2**20)
     if not contents:
         raise HTTPException(status_code=400, detail="Empty file")
-    if len(contents) > 200 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File exceeds 200 MB limit")
     name = file.filename or "upload"
 
     # Rasterised plans carry no embedded text; run OCR so room dimensions can be read.
@@ -115,20 +115,12 @@ async def inspect_media(
 
 
 def _ocr_bytes(contents: bytes, name: str) -> str:
-    import tempfile
-    from pathlib import Path
     from app.services.ocr_service import ocr_service
 
-    suffix = Path(name).suffix.lower() or ".pdf"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(contents)
-        tmp_path = Path(tmp.name)
     try:
-        return ocr_service.extract_document(tmp_path).get("full_text", "") or ""
+        return ocr_service.extract_document_bytes(contents, name).get("full_text", "") or ""
     except Exception:
         return ""
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
 
 @router.post("/intake/authority-check")
@@ -139,7 +131,7 @@ async def authority_check(
     """Inspect an uploaded certificate for QR codes and embedded digital signatures."""
     from app.services.issuing_authority_hub import issuing_authority_hub
 
-    contents = await file.read()
+    contents = await read_upload_limited(file, settings.MAX_UPLOAD_MB * 2**20)
     if not contents:
         raise HTTPException(status_code=400, detail="Empty file")
     text = _ocr_bytes(contents, file.filename or "upload.pdf")

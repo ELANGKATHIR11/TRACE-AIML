@@ -217,18 +217,19 @@ def make_application(session, institution, status=None):
 
 
 def make_document(session, application, document_type=None, plaintext=b"%PDF-1.4 test"):
-    """Create a Document for `application`. Writes raw bytes until Task 9's encrypted storage."""
+    """Create a Document for `application`, stored in the production encrypted format."""
     import hashlib
 
     from app.config import settings
     from app.models.enums import DocumentType
     from app.models.models import Document
+    from app.services.document_storage import encrypt_document
 
     document_type = document_type or DocumentType.AFFIDAVIT
     save_dir = settings.UPLOAD_DIR / f"app_{application.id}"
     save_dir.mkdir(parents=True, exist_ok=True)
     path = save_dir / f"{document_type.value.lower()}_{_next()}.pdf"
-    path.write_bytes(plaintext)
+    path.write_bytes(encrypt_document(plaintext, application.id))
 
     doc = Document(
         application_id=application.id,

@@ -9,6 +9,7 @@ Validates:
 
 from pathlib import Path
 from app.services.production_security import production_security
+from app.services.document_storage import encrypt_document, decrypt_document
 from app.services.image_forensics_service import image_forensics
 
 print("================================================================")
@@ -17,8 +18,8 @@ print("================================================================")
 
 # 1. Test AES-256-GCM Encryption / Decryption
 raw_payload = b"%PDF-1.7 Confidential AICTE Land Deed with Seal & Digital Signature"
-encrypted = production_security.encrypt_file_data(raw_payload, associated_metadata="APP-999")
-decrypted = production_security.decrypt_file_data(encrypted, associated_metadata="APP-999")
+encrypted = encrypt_document(raw_payload, 999)
+decrypted = decrypt_document(encrypted, 999)
 assert decrypted == raw_payload, "AES-256 Decryption failure!"
 print("[PASS] 1. AES-256-GCM Cryptographic Storage: Nonce (96-bit) + 256-bit Ciphertext + Auth Tag Verified")
 

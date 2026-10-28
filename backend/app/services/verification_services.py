@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from app.models.enums import ApplicationStatus, FlagCategory, FlagSeverity, VerificationStatus
 from app.models.models import Application, ChecklistRule, Document, ValidationFlag
 from app.services.audit_service import audit_service
+from app.services.document_storage import ela_on_bytes, read_document_plaintext
 from app.services.AI_service import gemini_service
 from app.services.ocr_service import ocr_service
 from app.services.rules_engine import rules_engine
@@ -27,16 +28,18 @@ logger = logging.getLogger(__name__)
 class VerificationService:
     def process_document(self, db: Session, document: Document) -> Dict[str, Any]:
         """Execute full parsing, OCR, field extraction, and forensics on an uploaded document."""
-        file_path = Path(document.file_path)
-        if not file_path.exists():
-            document.verification_status = VerificationStatus.REJECTED
-            document.verification_details = {"error": f"File not found on server: {document.file_path}"}
+        try:
+            plaintext = read_document_plaintext(document)
+        except (FileNotFoundError, ValueError) as exc:
+            logger.warning("Document %s unreadable: %s", document.id, type(exc).__name__)
+            document.verification_status = VerificationStatus.MANUAL_REVIEW_REQUIRED
+            document.verification_details = {"error": "Stored document is missing or unreadable"}
             db.add(document)
             db.commit()
             return {"error": "File missing"}
 
-        # 1. OCR & Structural Extraction (with transparent decryption if encrypted)
-        ocr_result = ocr_service.extract_document(file_path, app_id=document.application_id)
+        # 1. OCR & Structural Extraction (decrypted in memory)
+        ocr_result = ocr_service.extract_document_bytes(plaintext, document.filename)
         document.raw_ocr_text = ocr_result.get("full_text", "")
         document.pdf_metadata = ocr_result.get("metadata", {})
 
@@ -59,10 +62,9 @@ class VerificationService:
         )
 
         # 3b. Advanced Image Forensics (Error Level Analysis for images)
-        if file_path.suffix.lower() in [".png", ".jpg", ".jpeg"]:
+        if document.mime_type in ("image/png", "image/jpeg"):
             try:
-                from app.services.image_forensics_service import image_forensics
-                ela_res = image_forensics.perform_error_level_analysis(file_path)
+                ela_res = ela_on_bytes(plaintext, document.mime_type)
                 forensics["ela_analysis"] = ela_res
                 if ela_res.get("tamper_detected_by_ela"):
                     forensics["is_tampering_suspected"] = True
