@@ -7,8 +7,21 @@ Combines:
 """
 
 import logging
+import sys
+from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 from sqlmodel import Session, select
+
+# Link local sovereign LangGraph repository (f:/TRACE/langgraph-main)
+LANGGRAPH_CORE_LIBS = [
+    Path("f:/TRACE/langgraph-main/libs/checkpoint"),
+    Path("f:/TRACE/langgraph-main/libs/langgraph"),
+    Path("f:/TRACE/langgraph-main/libs/prebuilt"),
+]
+for lib_path in LANGGRAPH_CORE_LIBS:
+    if lib_path.exists() and str(lib_path) not in sys.path:
+        sys.path.insert(0, str(lib_path))
+
 try:
     from langgraph.graph import StateGraph, END  # type: ignore
     HAS_LANGGRAPH = True
