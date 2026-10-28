@@ -292,6 +292,13 @@ describe('safeNextPath', () => {
     expect(safeNextPath('/audit?page=2#top')).toBe('/audit?page=2#top');
   });
 
+  it('rejects paths that normalise to a protocol-relative URL', () => {
+    expect(safeNextPath('/.//evil.test')).toBe('/');
+    expect(safeNextPath('/a/..//evil.test')).toBe('/');
+    expect(safeNextPath('/%2e//evil.test')).toBe('/');
+    expect(safeNextPath('/%2E%2E//evil.test')).toBe('/');
+  });
+
   it('keeps encoded slashes as a same-origin path', () => {
     expect(safeNextPath('/%2F%2Fevil.test')).toBe('/%2F%2Fevil.test');
   });

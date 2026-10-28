@@ -52,7 +52,10 @@ export function safeNextPath(next: string | null): string {
     return '/';
   }
   if (url.origin !== window.location.origin) return '/';
-  return `${url.pathname}${url.search}${url.hash}`;
+  const resolved = `${url.pathname}${url.search}${url.hash}`;
+  // Dot-segment normalisation can turn an accepted input (`/.//host`, `/a/..//host`) into a
+  // protocol-relative path, which would leave the origin once navigated to.
+  return /^\/(?!\/)/.test(resolved) ? resolved : '/';
 }
 
 const PASSWORD_CHANGE_REQUIRED = 'Password change required';
