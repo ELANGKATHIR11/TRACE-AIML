@@ -2,6 +2,7 @@ import React from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft } from 'lucide-react';
+import { useAuth } from '../auth/AuthContext';
 import { fetchDocumentMetadata } from '../../lib/api/endpoints';
 import { formatApiTimestamp, formatApiValue } from '../../lib/utils/formatters';
 import { ApiUnavailableState, StatusIndicator } from '../../components/ApiStateFeedback';
@@ -11,6 +12,8 @@ import { DocumentRecord } from '../../types/api';
 export function StandaloneDocumentPage() {
   const { id } = useParams<{ id: string }>();
   const docId = id ?? '';
+  const { user } = useAuth();
+  const isApplicant = user?.role === 'applicant';
 
   const metadataQuery = useQuery({
     queryKey: ['document-metadata', docId],
@@ -28,11 +31,11 @@ export function StandaloneDocumentPage() {
     <div className="space-y-6">
       <div className="border-b border-[#CBD5E1] pb-4 space-y-1">
         <Link
-          to="/applications"
+          to={isApplicant ? '/applicant/applications' : '/applications'}
           className="inline-flex items-center gap-1 text-xs font-medium text-[#1B365D] hover:underline"
         >
           <ArrowLeft className="w-3.5 h-3.5" aria-hidden="true" />
-          <span>Back to Application Registry</span>
+          <span>{isApplicant ? 'Back to My Applications' : 'Back to Application Registry'}</span>
         </Link>
         <h1 className="text-2xl font-bold text-[#0F1E36] tracking-tight">
           Evidentiary Document Inspection — Document #{docId}

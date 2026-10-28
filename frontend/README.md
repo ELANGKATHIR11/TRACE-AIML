@@ -1,98 +1,49 @@
-# AICTE TRACE — Standalone Frontend (PS 26261)
+# AICTE TRACE — Frontend (PS 26261)
 
-**Trustworthy Regulatory Assurance & Compliance Engine**  
-Production-grade React + TypeScript + Vite standalone frontend for the AICTE Regulation Bureau scrutiny, forensic document authentication, and regulatory compliance platform.
+React + TypeScript + Vite frontend for the AICTE TRACE scrutiny, document authentication and compliance platform. Every record shown comes from the FastAPI backend; when the backend errors or omits a field, the UI shows the real status or "Not provided by API". AI output, tamper alerts and compliance flags are advisory only.
 
----
+## 1. Setup
 
-## 1. Core Architectural Principles
-
-- **Absolute Zero-Mock Policy:** Every metric, application dossier, compliance flag, statutory authority status, AI stage output, document preview, model score, and cryptographic audit verification displayed in this application comes strictly from live FastAPI backend responses (`VITE_API_BASE_URL`).
-- **Truthful Failure & Missing-Data Handling:** When the backend is unreachable, returns an HTTP error (`401`, `403`, `404`, `422`, `500`), or omits optional fields, the UI displays the exact HTTP/network status, renders `"Not provided by API"` for absent fields, and provides a genuine retry trigger.
-- **Statutory Safeguard:** Prominently enforces across the application shell and adjudication workflows that all AI inferences, tamper alerts, and compliance flags are strictly advisory decision-support signals.
-
----
-
-## 2. Environment Setup & Installation
-
-### Prerequisites
-- Node.js `>= 20.x`
-- FastAPI backend running at `http://localhost:8000` (Swagger UI at `http://localhost:8000/docs`, OpenAPI schema at `http://localhost:8000/openapi.json`)
-
-### Environment Configuration
-Copy `.env.example` to `.env`:
+Prerequisites: Node.js 20+ and the backend running on `http://localhost:8000` (see the repository README for `generate-keys`, `alembic upgrade head` and `create-admin`).
 
 ```bash
-cp .env.example .env
-```
-
-Ensure `VITE_API_BASE_URL` points to your FastAPI origin:
-
-```ini
-VITE_API_BASE_URL=http://localhost:8000
-```
-
-You can also inspect or override the active backend URL at runtime via the **API Connection & OpenAPI Inspector** drawer in the top navigation bar.
-
-### Install & Run
-
-```bash
-# Install dependencies
+cp .env.example .env   # VITE_API_BASE_URL defaults to /fastapi-proxy
 npm install
-
-# Start development server (Port 3000)
-npm run dev
-
-# Type-check (strict TypeScript)
-npm run lint
-
-# Run unit tests (API transport, validation schemas, formatters, permissions)
-npx --yes tsx --test src/lib/utils/formatters.test.ts
-
-# Production build
+npm run dev            # http://127.0.0.1:3000
+npm test               # Vitest
+npm run lint           # tsc --noEmit
 npm run build
 ```
 
----
+`VITE_API_BASE_URL` is read at build time and is the only API origin the app uses. The default `/fastapi-proxy` is served by the Vite dev proxy, which forwards to `http://localhost:8000` (override with `TRACE_API_ORIGIN`) and rewrites the refresh-cookie path from `/api/auth` to `/fastapi-proxy/api/auth`.
 
-## 3. Troubleshooting API Connectivity & CORS
+Sign in at `/login` with an account created by an administrator. Administrators manage users at `/admin/users`.
 
-1. **Network Error / Connection Refused (`Failed to fetch`)**
-   - Verify the FastAPI server is listening on `http://localhost:8000`:
-     ```bash
-     curl -i http://localhost:8000/openapi.json
-     ```
-   - Ensure `FastAPI` has `CORSMiddleware` configured to allow your frontend origin (`http://localhost:3000` or `http://localhost:5173`):
-     ```python
-     from fastapi.middleware.cors import CORSMiddleware
+## 2. Roles and routes
 
-     app.add_middleware(
-         CORSMiddleware,
-         allow_origins=["http://localhost:3000", "http://localhost:5173"],
-         allow_credentials=True,
-         allow_methods=["*"],
-         allow_headers=["*"],
-     )
-     ```
+| Role | Navigation |
+|---|---|
+| applicant | My Applications, New Application (intake, document upload, submit), rectification |
+| reviewer | Dashboard, Dossier Registry, Scrutiny Cockpit (records decisions), Audit Trail |
+| admin | Dashboard, Dossier Registry, Scrutiny Cockpit (read-only, no decisions), Audit Trail, Users |
 
-2. **`HTTP 401 Unauthorized` on Port 8000**
-   - If running inside a container environment where port `8000` is bound by another service (such as `control-plane-api`), either forward port `8000` to your local FastAPI instance or click **API Connection** in the header to point the frontend to your active FastAPI URL.
+Route guards are a presentation boundary; the backend enforces access.
 
----
+## 3. Troubleshooting
 
-## 4. Production Deployment Guidance
+- `Failed to fetch` or `502` from `/fastapi-proxy`: the backend is not listening on `TRACE_API_ORIGIN` (default `http://localhost:8000`). Check `curl http://localhost:8000/api/health`.
+- Signed out on every reload: for plain-HTTP local development set `ENVIRONMENT=development` and `COOKIE_SECURE=false` in `backend/.env`; a `Secure` cookie is not stored over HTTP.
+- AI review shows "unavailable": the backend returns `503` when Ollama is not running.
 
-1. Build the static production bundle:
-   ```bash
-   VITE_API_BASE_URL=https://api.trace.aicte-india.org npm run build
-   ```
-2. Serve the generated `dist/` directory using Nginx, Caddy, or a CDN with SPA fallback (`try_files $uri $uri/ /index.html;`).
-3. Enforce HTTPS (TLS 1.3) in production; `http://localhost:8000` is strictly for local development.
+## 4. Production deployment
 
----
+1. Build with the public origin of the site as the API base, e.g. `VITE_API_BASE_URL=https://trace.example.org npm run build`. Requests then go to `https://trace.example.org/api/...`. (An empty value falls back to `/fastapi-proxy`, which only the Vite dev server provides.)
+2. Serve `dist/` and the API from the **same origin** behind one reverse proxy (SPA fallback to `index.html`, `/api` forwarded to uvicorn). Use HTTPS and keep `COOKIE_SECURE=true`.
+3. The refresh cookie (`trace_refresh`) has `Path=/api/auth`. The proxy must expose the API at `/api/auth`, or rewrite the cookie path the way the Vite dev proxy does.
+4. Start uvicorn with `--forwarded-allow-ips=<proxy address>` (or set `FORWARDED_ALLOW_IPS`) so the per-IP login limiter sees client addresses rather than the proxy's.
+5. `COOKIE_SAMESITE` (default `strict`) and `CORS_ORIGINS` matter only for a cross-origin deployment, which requires `COOKIE_SAMESITE=none` with HTTPS and an exact origin list.
 
-## 5. Additional Documentation
+## 5. Documentation
 
-- [`docs/API_CAPABILITY_MATRIX.md`](docs/API_CAPABILITY_MATRIX.md) — Endpoint inventory and contract status.
-- [`docs/BACKEND_GAPS.md`](docs/BACKEND_GAPS.md) — Disclosed backend gaps and fallback-free handling.
-- [`docs/SECURITY_AND_AUTH.md`](docs/SECURITY_AND_AUTH.md) — Persona resolution, route boundaries, and data protection.
+- [`docs/API_CAPABILITY_MATRIX.md`](docs/API_CAPABILITY_MATRIX.md) — endpoints and which roles may call them.
+- [`docs/SECURITY_AND_AUTH.md`](docs/SECURITY_AND_AUTH.md) — authentication, session handling and data protection.

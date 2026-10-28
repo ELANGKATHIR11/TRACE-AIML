@@ -210,20 +210,41 @@ python -m pytest -v test_master_verification_suite.py
 ## 6. How to Run Locally
 
 ### Prerequisites
-- Python 3.11 with virtual environment or Conda.
-- (Optional) Local Ollama running `qwen2.5:1.5b-instruct` on `http://localhost:11434`.
+- Python 3.11 with [uv](https://docs.astral.sh/uv/), and Node.js 20+.
+- (Optional) Local Ollama on `http://localhost:11434` for AI review. When Ollama is down, `POST /api/applications/{id}/agent-review` returns `503`.
+- (Optional) The `ai` extra for the CrewAI / LangGraph / ChromaDB features: `uv sync --extra ai`.
 
-### 1. Run the Backend API
+### 1. Configure and migrate the backend
 ```bash
 cd backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-# Interactive OpenAPI / Swagger Docs: http://localhost:8000/docs
-# JSON OpenAPI Specification: http://localhost:8000/openapi.json
+uv sync
+cp .env.example .env
+uv run python -m app.cli generate-keys     # prints SECRET_KEY, AUDIT_HMAC_KEY, FILE_ENCRYPTION_KEY; paste into .env
 ```
+For local HTTP development also set these in `backend/.env`:
+```ini
+ENVIRONMENT=development
+COOKIE_SECURE=false
+```
+Create the schema and the first administrator (the password is prompted, 12-128 characters):
+```bash
+uv run python -m alembic upgrade head
+uv run python -m app.cli create-admin --email admin@example.org --full-name "Site Admin"
+```
+A local `aicte_platform.db` created before the Alembic migrations must be deleted and recreated, or stamped with `uv run python -m alembic stamp 0001` and then upgraded.
 
-### 2. Prototype Demonstration Accounts
-| Persona | Email | Password | Access Level |
-| :--- | :--- | :--- | :--- |
-| **Institution Applicant** | `applicant@apexedu.ac.in` | `password123` | Application creation, document intake, rectification |
-| **Scrutiny Officer** | `official@aicte-india.org` | `password123` | Scrutiny cockpit, evidence review, advisory findings, verdicts |
-| **System Administrator** | `admin@aicte-india.org` | `password123` | Full access, audit log verification, model management |
+### 2. Run the API and the frontend
+```bash
+uv run python -m uvicorn app.main:app --host 127.0.0.1 --port 8000   # backend/
+npm install && npm run dev                                          # frontend/, http://127.0.0.1:3000
+```
+The Vite dev server proxies `/fastapi-proxy` to `http://localhost:8000` (override with `TRACE_API_ORIGIN`). Sign in as the admin and use **Users** to create reviewer and applicant accounts; new users must change their temporary password at first sign-in. There are no built-in demo accounts.
+
+### 3. Production notes
+See [`frontend/README.md`](frontend/README.md) section 4 (same-origin reverse proxy, cookie path, forwarded IPs).
+
+### 4. Tests
+```bash
+cd backend && uv run python -m pytest -q
+cd frontend && npm test && npm run lint && npm run build
+```

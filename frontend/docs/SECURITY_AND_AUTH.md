@@ -1,34 +1,28 @@
 # AICTE TRACE — Security, Authentication & Access Control
 
-## 1. Authentication Architecture & Limitations
+## 1. Authentication
 
-### Requested Test Personas
-1. **AICTE Scrutiny Officer**
-   - Email: `official@aicte-india.org`
-   - Role: `REVIEWER` / `OFFICIAL`
-   - Permitted UI Workflows: Executive Scrutiny Dashboard (`/`), Application Registry (`/applications`), Dual-Pane Scrutiny Cockpit (`/applications/:id`), Officer Adjudication, and Cryptographic Audit Trail (`/audit`).
+- Sign-in is email and password at `/login` (`POST /api/auth/login`). A failed sign-in always shows the same message ("Incorrect email or password"). There are no built-in demo accounts; an administrator creates accounts (`/admin/users`, or `python -m app.cli create-admin` for the first one).
+- The backend returns a short-lived access token (15 minutes) in the response body. The frontend keeps it **in memory only** and sends it as `Authorization: Bearer`.
+- The refresh token is an `HttpOnly` cookie (`trace_refresh`, `Path=/api/auth`). On page load and on a `401` the frontend calls `POST /api/auth/refresh` once (shared across concurrent requests) and retries the original request once. If refresh fails, the session is cleared and the user is sent to `/login`. Sign-out and session loss in one tab propagate to other tabs.
+- Accounts with a temporary password (`must_change_password`) are redirected to `/change-password` before anything else.
+- Roles are `applicant`, `reviewer` and `admin`. Route guards (`RequireAuth`, `RequireRole`) and role-specific navigation are a presentation boundary only; the backend enforces every permission and is the sole authority.
 
-2. **Technical Institution Applicant**
-   - Email: `applicant@apexedu.ac.in`
-   - Role: `APPLICANT`
-   - Institution ID: `1`
-   - Permitted UI Workflows: Application Intake (`/applications/new`), Applicant Permitted Applications (`/applicant/applications`), and Closed-Loop Deficiency Rectification (`/applicant/applications/:id`).
+## 2. Role boundaries
 
-### Honest Identity Resolution
-- The frontend **never** fabricates JWTs, forges cryptographic role claims, or claims secure authentication when the backend does not enforce it.
-- When a user selects a persona in the institutional masthead:
-  1. The identity manager inspects discovered OpenAPI paths (`/openapi.json`) for a real authentication or persona-switching endpoint (`/api/auth/login`, `/api/auth/switch`, or `/api/auth/me`).
-  2. If the backend exposes an authentication endpoint and returns a bearer token or session cookie, the API client attaches `Authorization: Bearer <token>` (or `credentials: 'include'`) on subsequent requests.
-  3. If the backend does not expose an authentication endpoint, the UI explicitly labels the session as **`Dev Mode UI Persona (Unauthenticated Backend)`**.
-- **UI Access Boundaries:** Route guards (`RequireRole`) prevent an `APPLICANT` persona from accessing Officer Adjudication controls or the Executive Scrutiny Cockpit, and prevent an `OFFICIAL` persona from submitting applicant rectifications by accident. However, the UI explicitly discloses that frontend route guards are presentation boundaries and that the FastAPI server is the sole authority for access control.
+| Role | Can do |
+|---|---|
+| applicant | Create, upload to, submit and rectify applications of their own institution |
+| reviewer | Read all applications, run validation and AI review, record decisions, read the audit trail |
+| admin | Same read and review access as reviewer, no decisions; manages users |
 
----
+See `API_CAPABILITY_MATRIX.md` for the per-endpoint table.
 
-## 2. Data Protection & Transport Security
+## 3. Data protection and transport
 
-- **Zero Secret Leakage:** No API keys, private tokens, or credentials are embedded in client code. Only `VITE_API_BASE_URL` is read from environment configuration.
-- **Safe Multipart Uploads:** `FormData` uploads (`POST /api/documents/upload`, `POST /api/documents/{id}/rectify`) never hardcode `Content-Type: multipart/form-data`, allowing the browser to generate a cryptographic multipart boundary.
-- **Object URL Lifecycle:** Binary document previews (`Blob` responses from `GET /api/documents/{id}/preview`) are converted via `URL.createObjectURL` inside a managed `useEffect` hook and strictly revoked via `URL.revokeObjectURL` on component unmount or document/page change.
-- **XSS Prevention:** Server-returned text, OCR snippets, and officer notes are rendered through React's escaped text nodes; `dangerouslySetInnerHTML` is never used.
-- **Non-Idempotent Mutation Safety:** Consequential mutations (`POST /api/applications/{id}/decision`, `POST /api/applications`, `POST /api/documents/upload`, `POST /api/applications/{id}/submit-rectification`) disable submit controls while in flight and have automatic retries (`retry: false`) disabled in TanStack Query.
-- **Zero LocalStorage Dossier Persistence:** Sensitive application records, documents, and audit logs are never cached in `localStorage` or `sessionStorage`.
+- The browser stores no tokens or records in `localStorage` or `sessionStorage`. The only configuration read from the environment is the build-time `VITE_API_BASE_URL`.
+- Uploads use `FormData` without a hand-set `Content-Type`, so the browser supplies the multipart boundary.
+- Document previews are blob responses turned into object URLs and revoked on unmount or when the document or page changes.
+- Server text (OCR snippets, notes) is rendered as escaped React text; `dangerouslySetInnerHTML` is not used.
+- Consequential mutations (application create, upload, submit, decision, rectification) disable their controls while in flight and are never auto-retried.
+- Deployment: serve the SPA and `/api` from one origin over HTTPS; see `README.md` section 4 for cookie path, forwarded-IP and cross-origin settings.

@@ -24,6 +24,7 @@ import { ScrutinyCockpitPage } from './features/applications/ScrutinyCockpitPage
 import { CryptographicAuditPage } from './features/audit/CryptographicAuditPage';
 import { ApplicantApplicationsPage } from './features/applicant/ApplicantApplicationsPage';
 import { ApplicantDossierRectificationPage } from './features/applicant/ApplicantDossierRectificationPage';
+import { AdminUsersPage } from './features/admin/AdminUsersPage';
 import { StandaloneDocumentPage } from './features/documents/StandaloneDocumentPage';
 import { initCrossTabSync } from './lib/api/cacheSync';
 import type { Role } from './lib/permissions/roles';
@@ -42,6 +43,7 @@ const queryClient = new QueryClient({
 
 const STAFF: Role[] = ['reviewer', 'admin'];
 const APPLICANT: Role[] = ['applicant'];
+const ADMIN: Role[] = ['admin'];
 
 /** `/` is the staff dashboard; applicants land on their own applications instead. */
 function HomeRoute() {
@@ -96,6 +98,7 @@ export default function App() {
                 element={gated(APPLICANT, <ApplicantDossierRectificationPage />)}
               />
               <Route path="/audit" element={gated(STAFF, <CryptographicAuditPage />)} />
+              <Route path="/admin/users" element={gated(ADMIN, <AdminUsersPage />)} />
               {/* Documents are readable by their owning applicant and by staff (backend-enforced). */}
               <Route path="/documents/:id" element={<StandaloneDocumentPage />} />
               <Route path="*" element={<NotFoundPage />} />

@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   FileUp,
   FolderPlus,
+  Send,
   Upload,
 } from 'lucide-react';
 import {
@@ -16,6 +17,7 @@ import {
 import { invalidateAllAppQueries } from '../../lib/api/cacheSync';
 import {
   createApplication,
+  submitApplication,
   uploadApplicationDocument,
 } from '../../lib/api/endpoints';
 import { ApiClientError } from '../../lib/api/transport';
@@ -131,6 +133,14 @@ export function ApplicationIntakePage() {
       setSelectedFile(null);
       setClientFileError(null);
       invalidateAllAppQueries(queryClient, { applicationId: targetAppId, reason: 'DOCUMENT_UPLOADED' });
+    },
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: (id: string) => submitApplication(id),
+    retry: false, // Submission is a status transition; never auto-retry
+    onSuccess: (data) => {
+      invalidateAllAppQueries(queryClient, { applicationId: data.id, reason: 'APPLICATION_SUBMITTED' });
     },
   });
 
@@ -514,6 +524,48 @@ export function ApplicationIntakePage() {
               </button>
             </div>
           </form>
+
+          {/* Step 3 — Submit for scrutiny */}
+          {targetAppId.trim() && (
+            <div className="pt-4 border-t border-[#CBD5E1] space-y-3">
+              <div className="flex items-center gap-2">
+                <Send className="w-4 h-4 text-[#1B365D]" aria-hidden="true" />
+                <h3 className="text-base font-bold text-[#0F1E36]">03. Submit for Scrutiny</h3>
+              </div>
+              <p className="text-xs text-[#334155]">
+                Submitting locks the dossier for review. All required statutory documents must be
+                uploaded first. Target Endpoint:{' '}
+                <code className="font-mono">POST /api/applications/{'{id}'}/submit</code>
+              </p>
+              {submitMutation.isError && (
+                <ApiErrorState
+                  title="Application Submission Failed"
+                  error={submitMutation.error}
+                  endpoint={`POST /api/applications/${targetAppId.trim()}/submit`}
+                />
+              )}
+              {submitMutation.isSuccess && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="border border-[#86EFAC] bg-[#F0FDF4] p-3 text-xs text-[#14532D]"
+                >
+                  Application #{String(submitMutation.data.id)} submitted. Status:{' '}
+                  <strong>{formatApiValue(submitMutation.data.status)}</strong>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => submitMutation.mutate(targetAppId.trim())}
+                  disabled={submitMutation.isPending || submitMutation.isSuccess}
+                  className="btn-tactile-3d px-4 py-2 text-xs font-semibold text-white bg-[#1B365D] hover:bg-[#0F1E36] disabled:opacity-60 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  {submitMutation.isPending ? 'Submitting...' : 'Submit application'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Uploaded Documents in Session */}
           {uploadedDocs.length > 0 && (

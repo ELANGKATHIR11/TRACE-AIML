@@ -5,7 +5,7 @@ import { landingPathFor, useAuth } from '../features/auth/AuthContext';
 import type { Role } from '../lib/permissions/roles';
 import { StatutoryBanner } from '../components/StatutoryBanner';
 
-/** Primary navigation per role (spec §7.4). The admin Users page arrives with Task 19. */
+/** Primary navigation per role (spec §7.4). */
 const NAV_ITEMS: Record<Role, { to: string; label: string }[]> = {
   applicant: [
     { to: '/applicant/applications', label: 'My Applications' },
@@ -20,6 +20,7 @@ const NAV_ITEMS: Record<Role, { to: string; label: string }[]> = {
     { to: '/', label: 'Dashboard' },
     { to: '/applications', label: 'Dossier Registry' },
     { to: '/audit', label: 'Audit Trail' },
+    { to: '/admin/users', label: 'Users' },
   ],
 };
 
