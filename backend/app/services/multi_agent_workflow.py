@@ -31,7 +31,8 @@ try:
 except ImportError:
     HAS_CREWAI = False
 
-from app.models.models import Application, Document, ValidationFlag
+from app.models.models import Application, ValidationFlag
+from app.services import workflow
 from app.services.ollama_service import ollama_service
 from app.services.vector_rag_service import vector_rag_service
 
@@ -239,7 +240,7 @@ class MultiAgentWorkflowService:
         if not app_obj:
             raise ValueError(f"Application #{application_id} not found")
 
-        docs = db.exec(select(Document).where(Document.application_id == application_id)).all()
+        docs = workflow.current_documents(db, application_id)
         flags = db.exec(select(ValidationFlag).where(ValidationFlag.application_id == application_id)).all()
 
         initial_state: ScrutinyState = {

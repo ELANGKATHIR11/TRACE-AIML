@@ -21,6 +21,9 @@ from app.models.models import Application, ChecklistRule, Document, utc_now
 from app.services.audit_service import acquire_write_lock
 
 SUBMITTABLE = frozenset({ApplicationStatus.DRAFT})
+# upload (new documents) is DRAFT-only; RECTIFICATION_REQUESTED allows rectify instead (spec 6.1)
+UPLOADABLE = frozenset({ApplicationStatus.DRAFT})
+RECTIFIABLE = frozenset({ApplicationStatus.RECTIFICATION_REQUESTED})
 # validate and agent-review
 REVIEWABLE = frozenset(
     {

@@ -196,7 +196,6 @@ class DocumentRead(BaseModel):
     application_id: int
     document_type: DocumentType
     filename: str
-    file_path: str
     mime_type: str
     file_size_bytes: int
     sha256_hash: str
@@ -210,6 +209,31 @@ class DocumentRead(BaseModel):
     verification_status: VerificationStatus
     verification_details: Dict[str, Any] = Field(default_factory=dict)
     uploaded_at: datetime
+
+
+class RectificationSubmitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    notes: str = Field(default="", max_length=4000)
+    # Partial: only the fields the client sent are merged into the application's declared_data.
+    amended: DeclaredData = Field(default_factory=DeclaredData)
+
+
+class RectificationSubmitResponse(BaseModel):
+    application_id: int
+    status: ApplicationStatus
+    submitted_at: datetime
+    updated_fields: List[str]
+
+
+class AuthorityVerificationRead(BaseModel):
+    document_id: int
+    document_type: DocumentType
+    authority_name: Optional[str] = None
+    status: VerificationStatus
+    checked_at: Optional[datetime] = None
+    reference_id: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ValidationFlagRead(BaseModel):

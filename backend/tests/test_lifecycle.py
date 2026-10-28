@@ -223,7 +223,9 @@ def test_extra_field_422(client, session, headers, reviewer, applicant_a, inst_a
     assert r.status_code == 422
 
 
-def test_request_rectification_reopens(client, session, headers, reviewer, applicant_a, inst_a, make_application):
+def test_request_rectification_reopens(
+    client, session, headers, reviewer, applicant_a, inst_a, make_application, make_document
+):
     application = make_application(session, inst_a, status=ApplicationStatus.DEFICIENCY_FLAGGED)
 
     r = _decide(client, headers(reviewer), application.id, decision="REQUEST_RECTIFICATION")
@@ -232,9 +234,16 @@ def test_request_rectification_reopens(client, session, headers, reviewer, appli
     session.refresh(application)
     assert application.status == ApplicationStatus.RECTIFICATION_REQUESTED
 
-    # The applicant's edit window is open again.
-    r = _upload(client, headers(applicant_a), application.id, "AFFIDAVIT", 1)
+    # The edit window is open again: documents are rectified, not freshly uploaded.
+    document = make_document(session, application)
+    r = client.post(
+        f"/api/documents/{document.id}/rectify",
+        headers=headers(applicant_a),
+        files={"file": ("fixed.pdf", b"%PDF-1.4 corrected", "application/pdf")},
+    )
     assert r.status_code == 201, r.text
+    r = _upload(client, headers(applicant_a), application.id, "AFFIDAVIT", 1)
+    assert r.status_code == 409, r.text
 
 
 def test_reject_decision(client, session, headers, reviewer, inst_a, make_application):

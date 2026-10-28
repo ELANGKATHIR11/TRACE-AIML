@@ -11,11 +11,12 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.database import get_db
 from app.models.enums import DocumentType, VerificationStatus
-from app.models.models import Document, User
+from app.http import StatusConflict
+from app.models.models import Application, Document, User
 from app.schemas.schemas import DocumentRead, DocumentUploadResponse
 from app.services import workflow
 from app.services.access import load_application, load_document, require_applicant, require_staff
-from app.services.audit_service import log_audit_event
+from app.services.audit_service import acquire_write_lock, log_audit_event
 from app.services.document_storage import (
     content_disposition_inline,
     ela_on_bytes,
@@ -78,31 +79,28 @@ def parse_document_type(raw: str) -> DocumentType:
     )
 
 
-@router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_document(
-    application_id: int = Form(...),
-    document_type: str = Form(...),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_applicant),
-):
-    """Upload a supporting document, calculate SHA-256 for duplicate detection, and store safely."""
-    load_application(db, application_id, current_user, write=True)
-    doc_type_enum = parse_document_type(document_type)
+async def _ingest_document(
+    db: Session,
+    application: Application,
+    doc_type: DocumentType,
+    file: UploadFile,
+    current_user: User,
+) -> Document:
+    """Validate, encrypt and store the upload, then stage (flush) its Document row.
 
+    The caller supersedes any replaced row and commits via `log_audit_event`.
+    """
     contents = await read_upload_limited(file, settings.MAX_UPLOAD_MB * 2**20)
 
     # Magic-byte/polyglot sanitisation (422 on failure), AES-256-GCM encryption and write to disk
     target_path, sanitized_meta = store_document(
-        application_id, doc_type_enum, contents, file.filename or "doc.pdf"
+        application.id, doc_type, contents, file.filename or "doc.pdf"
     )
     sha256 = sanitized_meta["sha256_digest"]
-    file_size = sanitized_meta["size_bytes"]
-    safe_filename = target_path.name
 
-    # 2. Check for duplicate cross-application document recycling (Ghost Document detection)
+    # Check for duplicate cross-application document recycling (Ghost Document detection)
     duplicate_doc = db.exec(
-        select(Document).where(Document.sha256_hash == sha256).where(Document.application_id != application_id)
+        select(Document).where(Document.sha256_hash == sha256).where(Document.application_id != application.id)
     ).first()
     if duplicate_doc:
         log_audit_event(
@@ -112,46 +110,128 @@ async def upload_document(
             entity_id=str(duplicate_doc.id),
             summary=f"Security Alert: Document {file.filename} is identical to document in Application #{duplicate_doc.application_id}",
             actor=current_user,
-            application_id=application_id,
+            application_id=application.id,
             details={"duplicate_of_app": duplicate_doc.application_id, "sha256": sha256},
         )
 
-    # Persist Document entity
     doc = Document(
-        application_id=application_id,
-        document_type=doc_type_enum,
-        filename=file.filename or safe_filename,
+        application_id=application.id,
+        document_type=doc_type,
+        filename=file.filename or target_path.name,
         file_path=str(target_path),
         mime_type=sanitized_meta["detected_mime"],
-        file_size_bytes=file_size,
+        file_size_bytes=sanitized_meta["size_bytes"],
         sha256_hash=sha256,
         verification_status=VerificationStatus.PENDING,
     )
     db.add(doc)
-    db.commit()
-    db.refresh(doc)
+    db.flush()  # assigns doc.id
+    return doc
+
+
+def _upload_response(doc: Document, message: str) -> DocumentUploadResponse:
+    return DocumentUploadResponse(
+        id=doc.id,
+        document_id=doc.id,
+        application_id=doc.application_id,
+        filename=doc.filename,
+        document_type=doc.document_type,
+        sha256_hash=doc.sha256_hash,
+        verification_status=doc.verification_status,
+        message=message,
+    )
+
+
+@router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_document(
+    application_id: int = Form(...),
+    document_type: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_applicant),
+):
+    """Upload a supporting document to a DRAFT; a re-upload supersedes the current one of its type."""
+    application = load_application(db, application_id, current_user, write=True)
+    workflow.ensure_status(application, workflow.UPLOADABLE, "upload documents to")
+    doc_type_enum = parse_document_type(document_type)
+
+    doc = await _ingest_document(db, application, doc_type_enum, file, current_user)
+
+    # Under the write lock, re-check the status and supersede same-type documents; the flush above
+    # and these changes commit together with the audit entry below.
+    acquire_write_lock(db)
+    db.refresh(application)
+    workflow.ensure_status(application, workflow.UPLOADABLE, "upload documents to")
+    replaced = [
+        d for d in workflow.current_documents(db, application_id)
+        if d.document_type == doc_type_enum and d.id != doc.id
+    ]
+    for old in replaced:
+        old.superseded_by_id = doc.id
+        db.add(old)
 
     log_audit_event(
         db,
         action_type="DOCUMENT_UPLOADED",
         entity_type="Document",
         entity_id=str(doc.id),
-        summary=f"Uploaded {file.filename} for Application #{application_id} (SHA-256: {sha256[:12]}...)",
+        summary=f"Uploaded {file.filename} for Application #{application_id} (SHA-256: {doc.sha256_hash[:12]}...)",
         actor=current_user,
         application_id=application_id,
-        details={"filename": file.filename, "size_bytes": file_size, "sha256": sha256},
+        details={
+            "filename": file.filename,
+            "size_bytes": doc.file_size_bytes,
+            "sha256": doc.sha256_hash,
+            "superseded_document_ids": [d.id for d in replaced],
+        },
     )
+    db.refresh(doc)
+    return _upload_response(doc, "Document uploaded successfully. Ready for verification.")
 
-    return DocumentUploadResponse(
-        id=doc.id,
-        document_id=doc.id,
-        application_id=application_id,
-        filename=doc.filename,
-        document_type=doc.document_type,
-        sha256_hash=sha256,
-        verification_status=doc.verification_status,
-        message="Document uploaded successfully. Ready for verification.",
+
+@router.post(
+    "/{document_id}/rectify", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED
+)
+async def rectify_document(
+    document_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_applicant),
+):
+    """Replace a document while rectification is requested; the old row is kept as superseded."""
+    old = load_document(db, document_id, current_user, write=True)
+    application = db.get(Application, old.application_id)
+    workflow.ensure_status(application, workflow.RECTIFIABLE, "rectify documents of")
+    if old.superseded_by_id is not None:
+        raise StatusConflict("Document has already been replaced", application.status.value)
+
+    new = await _ingest_document(db, application, old.document_type, file, current_user)
+
+    acquire_write_lock(db)
+    db.refresh(application)
+    db.refresh(old)
+    workflow.ensure_status(application, workflow.RECTIFIABLE, "rectify documents of")
+    if old.superseded_by_id is not None:
+        raise StatusConflict("Document has already been replaced", application.status.value)
+    old.superseded_by_id = new.id
+    db.add(old)
+
+    log_audit_event(
+        db,
+        action_type="DOCUMENT_RECTIFIED",
+        entity_type="Document",
+        entity_id=str(new.id),
+        summary=f"Replaced document #{old.id} with {file.filename} for Application #{application.id}",
+        actor=current_user,
+        application_id=application.id,
+        details={
+            "superseded_document_id": old.id,
+            "document_type": new.document_type.value,
+            "sha256": new.sha256_hash,
+        },
     )
+    db.refresh(new)
+    return _upload_response(new, "Document rectified successfully. Ready for verification.")
 
 
 @router.post("/{document_id}/verify")
@@ -179,6 +259,16 @@ def list_application_documents(
     """List the application's current (not superseded) documents."""
     load_application(db, application_id, current_user)
     return workflow.current_documents(db, application_id)
+
+
+@router.get("/{document_id}", response_model=DocumentRead)
+def get_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Document metadata (never the server-side storage path)."""
+    return load_document(db, document_id, current_user)
 
 
 @router.get("/{document_id}/preview")

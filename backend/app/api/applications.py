@@ -24,6 +24,9 @@ from app.schemas.schemas import (
     InstitutionRead,
     OfficerDecisionRequest,
     OfficerDecisionResponse,
+    RectificationSubmitRequest,
+    RectificationSubmitResponse,
+    AuthorityVerificationRead,
 )
 from app.services.access import (
     load_application,
@@ -223,6 +226,81 @@ def submit_application(
     session.refresh(application)
     institution = session.get(Institution, application.institution_id)
     return _build_application_detail(session, application, institution)
+
+
+@router.post(
+    "/applications/{application_id}/submit-rectification",
+    response_model=RectificationSubmitResponse,
+)
+def submit_rectification(
+    application_id: int,
+    payload: RectificationSubmitRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(require_applicant),
+):
+    """Merge amended declared figures and resubmit after a rectification request (spec 6.1, 6.3)."""
+    application = load_application(session, application_id, current_user, write=True)
+    workflow.ensure_status(application, workflow.RECTIFIABLE, "submit a rectification for")
+
+    # Only fields the client actually sent; an explicit null never erases a declared figure.
+    amended = {
+        name: value
+        for name, value in payload.amended.model_dump(exclude_unset=True).items()
+        if value is not None
+    }
+    workflow.transition(
+        session, application, ApplicationStatus.SUBMITTED, allowed_from=workflow.RECTIFIABLE
+    )
+    # transition() holds the write lock, so the declared data read here is current.
+    declared = dict(application.declared_data or {})
+    updated_fields = [name for name, value in amended.items() if declared.get(name) != value]
+    declared.update(amended)
+    application.declared_data = declared  # new dict so the JSON column change is detected
+    session.add(application)
+
+    # Commits the merge, the status change and the audit entry together.
+    log_audit_event(
+        session,
+        application_id=application.id,
+        action_type="RECTIFICATION_SUBMITTED",
+        entity_type="Application",
+        entity_id=application.application_number,
+        actor=current_user,
+        summary=f"Rectification submitted for application {application.application_number}.",
+        details={"updated_fields": updated_fields, "notes": payload.notes},
+    )
+    session.refresh(application)
+    return RectificationSubmitResponse(
+        application_id=application.id,
+        status=application.status,
+        submitted_at=as_utc(application.updated_at),
+        updated_fields=updated_fields,
+    )
+
+
+@router.get(
+    "/applications/{application_id}/verifications",
+    response_model=List[AuthorityVerificationRead],
+)
+def list_application_verifications(
+    application_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Per-document authority verification outcome for the application's current documents."""
+    application = load_application(session, application_id, current_user)
+    return [
+        AuthorityVerificationRead(
+            document_id=doc.id,
+            document_type=doc.document_type,
+            authority_name=doc.issuing_authority,
+            status=doc.verification_status,
+            checked_at=(doc.verification_details or {}).get("checked_at"),
+            reference_id=doc.document_urn_or_id,
+            details=doc.verification_details or {},
+        )
+        for doc in workflow.current_documents(session, application.id)
+    ]
 
 
 def _decision_read(decision: OfficerDecision, audit_hash: Optional[str]) -> DecisionRead:

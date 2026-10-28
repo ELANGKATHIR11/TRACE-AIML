@@ -71,6 +71,13 @@ MATRIX = [
     ("POST", "/api/applications/{app}/submit", APPLICANT_ONLY, {}),
     (
         "POST",
+        "/api/applications/{app}/submit-rectification",
+        APPLICANT_ONLY,
+        {"json": {"notes": "Matrix rectification", "amended": {}}},
+    ),
+    ("GET", "/api/applications/{app}/verifications", EVERYONE, {}),
+    (
+        "POST",
         "/api/applications/{app}/decision",
         REVIEWER_ONLY,
         {"json": {"decision": "APPROVE", "notes": "Matrix decision notes"}},
@@ -81,7 +88,9 @@ MATRIX = [
         APPLICANT_ONLY,
         {"data": {"application_id": "{app}", "document_type": "AFFIDAVIT"}, "files": {"file": _PDF}},
     ),
+    ("POST", "/api/documents/{doc}/rectify", APPLICANT_ONLY, {"files": {"file": _PDF}}),
     ("GET", "/api/documents/application/{app}", EVERYONE, {}),
+    ("GET", "/api/documents/{doc}", EVERYONE, {}),
     ("GET", "/api/documents/{doc}/preview", EVERYONE, {}),
     ("GET", "/api/documents/{doc}/ela", STAFF_ONLY, {}),
     ("POST", "/api/documents/{doc}/verify", STAFF_ONLY, {}),
