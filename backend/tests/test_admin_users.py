@@ -209,6 +209,32 @@ def test_reset_password_policy_enforced(client, session, admin_headers):
     assert r.status_code == 422
 
 
+def test_admin_cannot_reset_own_password(client, admin, admin_headers):
+    r = client.patch(f"/api/admin/users/{admin.id}", json={"reset_password": "Another-Temp-456"}, headers=admin_headers)
+    assert r.status_code == 400
+    assert client.get("/api/auth/me", headers=admin_headers).status_code == 200
+
+
+def test_validation_error_does_not_echo_password(client, admin_headers):
+    secret = "Distinct-Secret-Pw-777"
+    body = payload(temporary_password=secret)
+    del body["role"]
+    r = client.post("/api/admin/users", json=body, headers=admin_headers)
+    assert r.status_code == 422
+    assert secret not in r.text
+    err = r.json()["detail"][0]
+    assert err["loc"] and err["msg"]
+    assert "input" not in err and "ctx" not in err
+
+
+def test_change_password_validation_error_does_not_echo_password(client, admin_headers):
+    secret = "Distinct-Secret-Pw-888"
+    r = client.post("/api/auth/change-password", json={"new_password": secret}, headers=admin_headers)
+    assert r.status_code == 422
+    assert secret not in r.text
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
 def _passwords(monkeypatch, *values):
     it = iter(values)
     monkeypatch.setattr(getpass, "getpass", lambda *a, **k: next(it))

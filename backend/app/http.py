@@ -3,6 +3,7 @@ import logging
 import uuid
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -56,6 +57,17 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     return response
 
 
+async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Pydantic's `input`/`ctx`/`url` would echo submitted values (passwords) back; keep only the shape.
+    detail = [
+        {"loc": list(err.get("loc", ())), "msg": str(err.get("msg", "")), "type": str(err.get("type", ""))}
+        for err in exc.errors()
+    ]
+    response = JSONResponse(status_code=422, content={"detail": detail})
+    apply_security_headers(response, request.url.path)
+    return response
+
+
 def install(app: FastAPI) -> None:
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
@@ -65,4 +77,5 @@ def install(app: FastAPI) -> None:
         allow_methods=["GET", "POST", "PATCH"],
         allow_headers=["Authorization", "Content-Type"],
     )
+    app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

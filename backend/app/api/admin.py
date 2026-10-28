@@ -102,6 +102,10 @@ def update_user(
 
     if user.id == admin.id and (new_active is False or new_role != UserRole.ADMIN):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Admins cannot deactivate or demote themselves")
+    if user.id == admin.id and payload.reset_password is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Admins cannot reset their own password here; use change-password"
+        )
     _check_role_institution(session, new_role, new_institution)
     if payload.reset_password is not None:
         _check_password(payload.reset_password, user.email)
