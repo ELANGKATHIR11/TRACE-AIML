@@ -1,0 +1,91 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* GovTech Sovereign Institutional Palette */
+  --gov-primary: #1F3A6E;
+  --gov-primary-hover: #162B52;
+  --gov-primary-light: #EEF2F8;
+  --gov-saffron: #D9531E;
+  --gov-saffron-light: #FFF7ED;
+
+  /* Surfaces & Borders */
+  --gov-bg: #F8FAFC;
+  --gov-surface: #FFFFFF;
+  --gov-surface-subtle: #F1F5F9;
+  --gov-border: #E2E8F0;
+  --gov-border-strong: #CBD5E1;
+
+  /* Typography */
+  --text-main: #0F172A;
+  --text-muted: #475569;
+  --text-subtle: #64748B;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Status Tokens */
+  --status-verified: #15803D;
+  --status-verified-bg: #DCFCE7;
+  --status-mismatch: #B91C1C;
+  --status-mismatch-bg: #FEE2E2;
+  --status-expired: #C2410C;
+  --status-expired-bg: #FFEDD5;
+  --status-manual: #7E22CE;
+  --status-manual-bg: #F3E8FF;
+  --status-pending: #B45309;
+  --status-pending-bg: #FEF3C7;
+  --status-unavailable: #475569;
+  --status-unavailable-bg: #F1F5F9;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-sans);
+  background-color: var(--gov-bg);
+  color: var(--text-main);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s ease;
+}
+
+input, select, textarea {
+  font-family: inherit;
+  font-size: 0.875rem;
+}
+
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
