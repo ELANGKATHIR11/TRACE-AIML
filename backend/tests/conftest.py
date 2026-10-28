@@ -65,3 +65,37 @@ def session(db_path):
 
     with Session(get_engine()) as s:
         yield s
+
+
+_user_counter = 0
+
+
+def make_user(
+    session,
+    role,
+    *,
+    email=None,
+    password="Correct-Horse-9",
+    institution_id=None,
+    must_change_password=False,
+):
+    """Create and persist a User. Plain function: `from tests.conftest import make_user`."""
+    global _user_counter
+    from app.models.enums import UserRole
+    from app.models.models import User
+    from app.services.security import hash_password
+
+    _user_counter += 1
+    role_value = role if isinstance(role, UserRole) else UserRole(role)
+    user = User(
+        email=email or f"{role_value.value}{_user_counter}@example.test",
+        full_name=f"Test {role_value.value} {_user_counter}",
+        hashed_password=hash_password(password),
+        role=role_value,
+        institution_id=institution_id,
+        must_change_password=must_change_password,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user

@@ -13,6 +13,7 @@ from app.models.models import (
     ChecklistRule,
     Document,
     Institution,
+    RefreshToken,
     User,
     ValidationFlag,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "ChecklistRule",
     "Document",
     "Institution",
+    "RefreshToken",
     "User",
     "ValidationFlag",
 ]

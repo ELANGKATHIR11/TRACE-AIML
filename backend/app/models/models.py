@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+import sqlalchemy as sa
 from sqlalchemy import Column, JSON
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -29,7 +30,25 @@ class User(SQLModel, table=True):
     role: UserRole = Field(default=UserRole.APPLICANT, index=True)
     institution_id: Optional[int] = Field(default=None, foreign_key="institutions.id")
     is_active: bool = Field(default=True)
+    token_version: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    failed_login_count: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    locked_until: Optional[datetime] = Field(default=None)
+    must_change_password: bool = Field(default=False, sa_column_kwargs={"server_default": sa.false()})
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class RefreshToken(SQLModel, table=True):
+    """Rotating refresh token; only the SHA-256 hash of the raw token is stored."""
+    __tablename__ = "refresh_tokens"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    family_id: str = Field(index=True)
+    token_hash: str = Field(unique=True)
+    issued_at: datetime
+    expires_at: datetime
+    revoked_at: Optional[datetime] = Field(default=None)
+    replaced_by_id: Optional[int] = Field(default=None, foreign_key="refresh_tokens.id")
 
 
 class Institution(SQLModel, table=True):
