@@ -103,7 +103,38 @@ def test_infrastructure_floor_plan_and_evc_triage():
     assert any("Classroom 201" in item for item in res["evc_checklist"])
 
 
-def test_ml_endpoints_use_real_registry(client, headers, reviewer):
+@pytest.fixture()
+def tiny_registry(tmp_path, monkeypatch):
+    """Train tiny pinned models into a private MODELS_DIR so assertions never depend on repo state."""
+    from app.services import ml_training_platform as mod
+
+    monkeypatch.setattr(mod, "MODELS_DIR", tmp_path)
+    docs = [
+        {"text": f"{text} {i}", "label": label}
+        for label, text in (
+            ("FIRE_SAFETY", "fire safety certificate fire services"),
+            ("LAND_DOCUMENT", "land survey sale deed revenue"),
+        )
+        for i in range(8)
+    ]
+    ml_training_platform.train_document_classifier(docs)
+    forgery = [
+        {
+            "ela_std_error": (18.0 if tampered else 2.0) + i * 0.1,
+            "font_count": 8 if tampered else 1,
+            "time_delta_hours": 1200.0 if tampered else 1.0,
+            "has_editing_software": tampered,
+            "text_char_entropy": 2.5 if tampered else 4.5,
+            "is_tampered": int(tampered),
+        }
+        for tampered in (True, False)
+        for i in range(8)
+    ]
+    ml_training_platform.train_forgery_detector(forgery)
+    return tmp_path
+
+
+def test_ml_endpoints_use_real_registry(client, headers, reviewer, tiny_registry):
     h = headers(reviewer)
     m = client.get("/api/models/metrics", headers=h)
     assert m.status_code == 200
@@ -157,3 +188,87 @@ def test_upload_then_preview_is_decrypted_and_institution_scoped(
     ok = client.get(f"/api/documents/{doc_id}/preview", headers=headers(applicant_a))
     assert ok.status_code == 200 and ok.content == plaintext
     assert client.get(f"/api/documents/{doc_id}/preview", headers=headers(applicant_b)).status_code == 404
+
+
+# ------------------------------------------------------------ issuing authority hub logic
+def _hub(monkeypatch, record):
+    from app.services.issuing_authority_hub import issuing_authority_hub
+
+    monkeypatch.setattr(
+        issuing_authority_hub,
+        "_lookup_registry_record",
+        lambda urn, doc_type, text: (record, "TEST_REGISTRY" if record else ""),
+    )
+    return issuing_authority_hub
+
+
+def _verify(hub, doc_type, fields, text, **kw):
+    return hub.verify_document_with_authority(doc_type, fields, text, **kw)
+
+
+def test_hub_verified_when_record_matches(monkeypatch):
+    from app.models.enums import VerificationStatus
+
+    hub = _hub(monkeypatch, {"authority_name": "Fire Dept", "status": "VALID"})
+    res = _verify(hub, DocumentType.FIRE_SAFETY_CERTIFICATE, {"certificate_number": "FX-1"}, "Certificate No: FX-1")
+    assert res["verification_status"] == VerificationStatus.VERIFIED
+    assert res["flags"] == []
+
+
+def test_hub_mismatch_on_land_area_discrepancy(monkeypatch):
+    from app.models.enums import VerificationStatus
+
+    hub = _hub(monkeypatch, {"authority_name": "Revenue", "land_area_acres": 2.5})
+    res = _verify(
+        hub,
+        DocumentType.LAND_OWNERSHIP_DOCUMENT,
+        {"document_id_or_number": "SURVEY-1", "land_area_acres": 12.0},
+        "Survey No: SURVEY-1",
+        declared_data={"land_area_acres": 12.0},
+    )
+    assert res["verification_status"] == VerificationStatus.MISMATCH
+    assert any("2.5 acres" in d for d in res["discrepancies"])
+    assert res["flags"]
+
+
+def test_hub_expired_when_record_status_expired(monkeypatch):
+    from app.models.enums import VerificationStatus
+
+    hub = _hub(monkeypatch, {"authority_name": "Fire Dept", "status": "EXPIRED", "expiry_date": "2020-01-01"})
+    res = _verify(hub, DocumentType.FIRE_SAFETY_CERTIFICATE, {"certificate_number": "FX-2"}, "Certificate No: FX-2")
+    assert res["verification_status"] == VerificationStatus.EXPIRED
+    assert res["flags"]
+
+
+def test_hub_expired_by_extracted_date_without_registry_record(monkeypatch):
+    from app.models.enums import VerificationStatus
+
+    hub = _hub(monkeypatch, None)
+    res = _verify(
+        hub,
+        DocumentType.FIRE_SAFETY_CERTIFICATE,
+        {"certificate_number": "FX-3", "expiry_date": "2020-01-01"},
+        "Certificate No: FX-3 Expiry Date: 2020-01-01",
+    )
+    assert res["verification_status"] == VerificationStatus.EXPIRED
+
+
+def test_hub_source_unavailable_for_offline_urn(monkeypatch):
+    from app.models.enums import VerificationStatus
+
+    hub = _hub(monkeypatch, None)
+    res = _verify(
+        hub,
+        DocumentType.LAND_OWNERSHIP_DOCUMENT,
+        {"document_id_or_number": "SURVEY-OFFLINE-503"},
+        "Survey No: SURVEY-OFFLINE-503",
+    )
+    assert res["verification_status"] == VerificationStatus.SOURCE_UNAVAILABLE
+
+
+def test_hub_manual_review_without_urn_or_qr(monkeypatch):
+    from app.models.enums import VerificationStatus
+
+    hub = _hub(monkeypatch, None)
+    res = _verify(hub, DocumentType.AFFIDAVIT, {}, "Plain unsigned declaration without URN or QR")
+    assert res["verification_status"] == VerificationStatus.MANUAL_REVIEW_REQUIRED

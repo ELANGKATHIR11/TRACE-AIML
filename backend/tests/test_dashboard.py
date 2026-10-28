@@ -83,3 +83,35 @@ def test_empty_db_zeroes(client, headers, reviewer):
 def test_dashboard_requires_staff(client, headers, applicant_a):
     assert client.get("/api/dashboard/metrics", headers=headers(applicant_a)).status_code == 403
     assert client.get("/api/models", headers=headers(applicant_a)).status_code == 403
+
+
+def test_flags_on_superseded_documents_not_counted(client, session, headers, reviewer, inst_a):
+    from app.models.enums import FlagCategory, FlagSeverity
+    from app.models.models import ValidationFlag
+
+    app = make_application(session, inst_a)
+    old = _doc(session, app, DocumentType.AFFIDAVIT, VerificationStatus.MISMATCH)
+    new = _doc(session, app, DocumentType.AFFIDAVIT, VerificationStatus.VERIFIED)
+    old.superseded_by_id = new.id
+    session.add(old)
+
+    def flag(document_id, severity, resolved=False):
+        session.add(
+            ValidationFlag(
+                application_id=app.id,
+                document_id=document_id,
+                flag_category=FlagCategory.INCOMPLETE_FIELD,
+                severity=severity,
+                reason="r",
+                is_resolved=resolved,
+            )
+        )
+
+    flag(old.id, FlagSeverity.CRITICAL)  # superseded: excluded
+    flag(old.id, FlagSeverity.LOW, resolved=True)  # superseded: excluded
+    flag(new.id, FlagSeverity.CRITICAL)
+    flag(None, FlagSeverity.LOW, resolved=True)  # application-level: counted
+    session.commit()
+
+    flags = client.get("/api/dashboard/metrics", headers=headers(reviewer)).json()["flags"]
+    assert flags == {"total": 2, "critical": 1, "resolved": 1, "pending_resolution": 1}
