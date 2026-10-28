@@ -9,7 +9,13 @@ Combines:
 import logging
 from typing import Any, Dict, List, Optional, TypedDict
 from sqlmodel import Session, select
-from langgraph.graph import StateGraph, END
+try:
+    from langgraph.graph import StateGraph, END  # type: ignore
+    HAS_LANGGRAPH = True
+except ImportError:
+    StateGraph = None  # type: ignore
+    END = "__end__"  # type: ignore
+    HAS_LANGGRAPH = False
 
 from app.models.models import Application, Document, ValidationFlag
 from app.services.ollama_service import ollama_service
@@ -144,18 +150,20 @@ def evidence_compiler_node(state: ScrutinyState) -> ScrutinyState:
     return state
 
 
-# Build LangGraph State Graph
-workflow = StateGraph(ScrutinyState)
-workflow.add_node("forensic_auditor", forensic_auditor_node)
-workflow.add_node("compliance_officer", compliance_officer_node)
-workflow.add_node("evidence_compiler", evidence_compiler_node)
+# Build LangGraph State Graph if available
+if HAS_LANGGRAPH and StateGraph is not None:
+    workflow = StateGraph(ScrutinyState)
+    workflow.add_node("forensic_auditor", forensic_auditor_node)
+    workflow.add_node("compliance_officer", compliance_officer_node)
+    workflow.add_node("evidence_compiler", evidence_compiler_node)
 
-workflow.set_entry_point("forensic_auditor")
-workflow.add_edge("forensic_auditor", "compliance_officer")
-workflow.add_edge("compliance_officer", "evidence_compiler")
-workflow.add_edge("evidence_compiler", END)
-
-orchestrated_scrutiny_graph = workflow.compile()
+    workflow.set_entry_point("forensic_auditor")
+    workflow.add_edge("forensic_auditor", "compliance_officer")
+    workflow.add_edge("compliance_officer", "evidence_compiler")
+    workflow.add_edge("evidence_compiler", END)
+    orchestrated_scrutiny_graph = workflow.compile()
+else:
+    orchestrated_scrutiny_graph = None
 
 
 class MultiAgentWorkflowService:
@@ -202,8 +210,13 @@ class MultiAgentWorkflowService:
             "error": None,
         }
 
-        # Execute LangGraph Directed Acyclic Workflow
-        final_state = orchestrated_scrutiny_graph.invoke(initial_state)
+        # Execute LangGraph Directed Acyclic Workflow if compiled, else sequential execution
+        if orchestrated_scrutiny_graph is not None:
+            final_state = orchestrated_scrutiny_graph.invoke(initial_state)
+        else:
+            state = forensic_auditor_node(initial_state)
+            state = compliance_officer_node(state)
+            final_state = evidence_compiler_node(state)
 
         return {
             "application_id": application_id,

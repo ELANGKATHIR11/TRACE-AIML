@@ -152,6 +152,7 @@ def agent_review(
 ) -> Dict[str, Any]:
     """Run the grounded three-role AI review. Returns available=False if the local model is down."""
     from app.models.enums import UserRole
+    from app.models.models import Application
     from app.services.multi_agent_workflow import multi_agent_workflow_service
     from app.services.audit_service import log_audit_event
 
