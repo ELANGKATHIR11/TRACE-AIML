@@ -24,9 +24,8 @@ from PIL import Image
 
 from app.config import settings
 
-# Master Encryption Key derived from SECRET_KEY (32 bytes for AES-256)
-MASTER_KEY = hashlib.sha256(settings.SECRET_KEY.encode("utf-8")).digest()
-aesgcm = AESGCM(MASTER_KEY)
+# Dedicated file-encryption key (32 bytes for AES-256), independent of SECRET_KEY
+aesgcm = AESGCM(settings.file_encryption_key_bytes)
 
 
 class ProductionSecurityService:
