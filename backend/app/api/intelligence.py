@@ -1,4 +1,4 @@
-"""AI / ML / RAG / media-intake endpoints used by the frontend workbench and intake studio.
+"""AI / ML / RAG / media-intake endpoints for the standalone AICTE TRACE backend API.
 Every endpoint calls the real backend service; nothing here returns canned data.
 """
 

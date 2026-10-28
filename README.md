@@ -27,7 +27,7 @@ TRACE delivers an automated, evidence-grounded screening pipeline operating **10
 3. **Forensic & Machine Learning Inspection:** Employs Error Level Analysis (ELA), scikit-learn TF-IDF document classification, Random Forest forgery detection, and PyMuPDF vector span parsing with dynamic red bounding-box page preview overlays (`/api/documents/{id}/preview`).
 4. **Local Vector RAG & Grounded AI Review:** Indexes official APH clauses in ChromaDB for semantic retrieval, paired with an offline 3-role AI advisory review team running on local Ollama (`qwen2.5:1.5b-instruct`).
 5. **Closed-Loop Rectification Workflow:** Allows applicants to view identified deficiencies, upload replacement certificates, amend declared metrics, and trigger automated re-validation prior to final administrative action.
-6. **Simple & Professional Institutional Frontend:** A human-crafted, clean light-mode GovTech interface adhering strictly to institutional standards (warm paper background, white cards, hairline borders, system typography, tabular numerals, and zero AI-generated purple/neon templates).
+6. **Standalone Enterprise Headless Backend API:** A robust, high-performance RESTful API architecture providing OpenAPI/Swagger interactive endpoints, automated JSON scrutiny packages, and zero frontend dependencies for seamless integration into any client portal.
 
 > **Statutory Safeguard (PRD & SIH 26261):** All AI inferences, tamper alerts, and compliance flags are strictly **advisory decision-support signals**. Statutory scrutiny, physical inspections where required, and final regulatory determinations remain exclusively with competent AICTE authorities.
 
