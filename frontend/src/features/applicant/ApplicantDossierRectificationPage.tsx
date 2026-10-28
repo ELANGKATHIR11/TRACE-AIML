@@ -11,7 +11,7 @@ import {
   RefreshCw,
   Send,
 } from 'lucide-react';
-import { DocumentRecord, PersonaRole } from '../../types/api';
+import { DocumentRecord } from '../../types/api';
 import { invalidateAllAppQueries } from '../../lib/api/cacheSync';
 import {
   fetchApplicationDetail,
@@ -35,12 +35,16 @@ import {
   ApiLoadingState,
   StatusIndicator,
 } from '../../components/ApiStateFeedback';
-import { RequireRole, useIdentity } from '../identity/IdentityContext';
+import { useAuth } from '../auth/AuthContext';
+
+/** Empty number inputs must stay undefined (not NaN) so the optional amended figures validate. */
+const optionalNumber = (v: unknown) =>
+  v === '' || v === null || v === undefined ? undefined : Number(v);
 
 export function ApplicantDossierRectificationPage() {
   const { id } = useParams<{ id: string }>();
   const applicationId = id ?? '';
-  const { activePersona } = useIdentity();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
 
   const [selectedDocId, setSelectedDocId] = useState<string>('');
@@ -67,11 +71,10 @@ export function ApplicantDossierRectificationPage() {
   const documents = appDetail?.documents ?? [];
   const flags = flagsQuery.data ?? appDetail?.flags ?? [];
 
-  const isOwnedByApplicant = canSubmitRectification(
-    activePersona.role,
-    activePersona.institutionId,
-    appDetail?.institution_id
-  );
+  // Ownership is enforced by the backend (another institution's dossier is a 404); the UI gates
+  // on role + workflow status only.
+  const canRectify =
+    user !== null && Boolean(appDetail?.status) && canSubmitRectification(user, appDetail?.status ?? '');
 
   const rectifyDocMutation = useMutation({
     mutationFn: rectifyDocument,
@@ -93,30 +96,25 @@ export function ApplicantDossierRectificationPage() {
   } = useForm<ApplicantRectificationFormValues>({
     resolver: zodResolver(ApplicantRectificationFormSchema),
     defaultValues: {
-      justification: '',
-      confirm_submission: undefined,
+      notes: '',
+      land_area_acres: undefined,
+      built_up_area_sqm: undefined,
     },
   });
 
   const submitRectificationMutation = useMutation({
     mutationFn: (values: ApplicantRectificationFormValues) =>
       submitApplicationRectification(applicationId, {
-        justification: values.justification,
-        notes: values.justification,
-        amended_parameters: {
-          declared_land_area: Number.isFinite(values.declared_land_area)
-            ? values.declared_land_area
-            : undefined,
-          built_up_area: Number.isFinite(values.built_up_area)
-            ? values.built_up_area
-            : undefined,
-          total_intake: Number.isFinite(values.total_intake)
-            ? values.total_intake
-            : undefined,
-          faculty_count: Number.isFinite(values.faculty_count)
-            ? values.faculty_count
-            : undefined,
-        },
+        notes: values.notes,
+        // Only figures the applicant actually entered are sent; the backend merges them.
+        amended: Object.fromEntries(
+          Object.entries({
+            land_area_acres: values.land_area_acres,
+            built_up_area_sqm: values.built_up_area_sqm,
+            total_intake: values.total_intake,
+            faculty_count: values.faculty_count,
+          }).filter(([, v]) => v !== undefined)
+        ),
       }),
     retry: false,
     onSuccess: () => {
@@ -132,12 +130,12 @@ export function ApplicantDossierRectificationPage() {
       return;
     }
     if (!replacementFile) {
-      setFileError('Select a replacement PDF, PNG, JPEG, or TIFF document.');
+      setFileError('Select a replacement PDF, PNG, or JPEG document.');
       return;
     }
-    const check = validateUploadFile(replacementFile);
-    if (!check.valid) {
-      setFileError(check.error ?? 'Invalid file.');
+    const fileProblem = validateUploadFile(replacementFile);
+    if (fileProblem) {
+      setFileError(fileProblem);
       return;
     }
     setFileError(null);
@@ -149,7 +147,7 @@ export function ApplicantDossierRectificationPage() {
   };
 
   return (
-    <RequireRole allowedRoles={[PersonaRole.APPLICANT]}>
+    <>
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#CBD5E1] pb-4">
           <div className="space-y-1">
@@ -195,18 +193,19 @@ export function ApplicantDossierRectificationPage() {
             onRetry={() => void detailQuery.refetch()}
             isRetrying={detailQuery.isFetching}
           />
-        ) : !isOwnedByApplicant ? (
-          <div
-            role="alert"
-            className="border border-[#FECACA] bg-[#FEF2F2] p-5 text-xs text-[#7F1D1D]"
-          >
-            <strong>Institution Ownership Boundary:</strong> This dossier belongs to Institution ID{' '}
-            <code className="font-mono">#{String(appDetail?.institution_id)}</code>, whereas the
-            active applicant persona is authorized strictly for Institution ID{' '}
-            <code className="font-mono">#{String(activePersona.institutionId ?? 1)}</code>.
-            Rectification of another institution&apos;s documents is prohibited.
-          </div>
         ) : (
+          <>
+          {!canRectify && (
+            <div
+              role="status"
+              className="border border-[#CBD5E1] bg-[#F8FAFC] p-5 text-xs text-[#334155]"
+            >
+              <strong>Rectification Not Open:</strong> Document replacement and rectification
+              submission are available only while the dossier status is{' '}
+              <code className="font-mono">RECTIFICATION_REQUESTED</code>. Current status:{' '}
+              <code className="font-mono">{formatApiValue(appDetail?.status)}</code>.
+            </div>
+          )}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             {/* Left Column: Reported Deficiencies & Document Replacement */}
             <div className="lg:col-span-6 space-y-6">
@@ -287,12 +286,12 @@ export function ApplicantDossierRectificationPage() {
                       htmlFor="rectify-file-input"
                       className="block font-semibold text-[#0F1E36] mb-1"
                     >
-                      Replacement Document File (PDF, PNG, JPEG, TIFF) *
+                      Replacement Document File (PDF, PNG, JPEG · Max 25 MB) *
                     </label>
                     <input
                       id="rectify-file-input"
                       type="file"
-                      accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif"
+                      accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
                       onChange={(e) => setReplacementFile(e.target.files?.[0] ?? null)}
                       className="block w-full text-xs text-[#334155] file:mr-3 file:py-1.5 file:px-3 file:border file:border-[#CBD5E1] file:text-xs file:font-semibold file:bg-[#F4F6F9] file:text-[#1B365D] cursor-pointer"
                     />
@@ -332,7 +331,7 @@ export function ApplicantDossierRectificationPage() {
                   <div className="flex justify-end pt-2">
                     <button
                       type="submit"
-                      disabled={rectifyDocMutation.isPending}
+                      disabled={!canRectify || rectifyDocMutation.isPending}
                       className="px-4 py-2 text-xs font-semibold text-white bg-[#1B365D] hover:bg-[#0F1E36] disabled:opacity-60 cursor-pointer"
                     >
                       {rectifyDocMutation.isPending
@@ -393,9 +392,14 @@ export function ApplicantDossierRectificationPage() {
                         id="amend-land-area"
                         type="number"
                         step="0.01"
-                        {...register('declared_land_area', { valueAsNumber: true })}
+                        {...register('land_area_acres', { setValueAs: optionalNumber })}
                         className="w-full px-3 py-2 font-mono bg-[#F4F6F9] border border-[#CBD5E1]"
                       />
+                      {errors.land_area_acres && (
+                        <p role="alert" className="mt-1 text-[#B91C1C] font-medium">
+                          {errors.land_area_acres.message}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label
@@ -408,9 +412,14 @@ export function ApplicantDossierRectificationPage() {
                         id="amend-built-up"
                         type="number"
                         step="0.1"
-                        {...register('built_up_area', { valueAsNumber: true })}
+                        {...register('built_up_area_sqm', { setValueAs: optionalNumber })}
                         className="w-full px-3 py-2 font-mono bg-[#F4F6F9] border border-[#CBD5E1]"
                       />
+                      {errors.built_up_area_sqm && (
+                        <p role="alert" className="mt-1 text-[#B91C1C] font-medium">
+                          {errors.built_up_area_sqm.message}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -419,38 +428,18 @@ export function ApplicantDossierRectificationPage() {
                       htmlFor="rectification-justification"
                       className="block font-semibold text-[#0F1E36] mb-1"
                     >
-                      Rectification Summary & Compliance Justification *
+                      Rectification Summary & Compliance Justification
                     </label>
                     <textarea
                       id="rectification-justification"
                       rows={4}
                       placeholder="Provide item-by-item explanation of uploaded replacement deeds, NOC renewals, or amended parameters..."
-                      {...register('justification')}
+                      {...register('notes')}
                       className="w-full px-3 py-2 bg-[#F4F6F9] border border-[#CBD5E1] text-[#0F1E36]"
                     />
-                    {errors.justification && (
+                    {errors.notes && (
                       <p role="alert" className="mt-1 text-[#B91C1C] font-medium">
-                        {errors.justification.message}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="p-3 bg-[#F4F6F9] border border-[#CBD5E1]">
-                    <label className="flex items-start gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        {...register('confirm_submission')}
-                        className="mt-0.5"
-                      />
-                      <span>
-                        I confirm on behalf of Institution #{activePersona.institutionId ?? 1} that
-                        the replacement documents and amended figures are accurate and ready for
-                        AICTE re-scrutiny.
-                      </span>
-                    </label>
-                    {errors.confirm_submission && (
-                      <p role="alert" className="mt-1.5 text-[#B91C1C] font-medium">
-                        {errors.confirm_submission.message}
+                        {errors.notes.message}
                       </p>
                     )}
                   </div>
@@ -479,9 +468,11 @@ export function ApplicantDossierRectificationPage() {
                       <div className="font-mono">
                         Submitted At:{' '}
                         {formatApiTimestamp(submitRectificationMutation.data.submitted_at)} ·
-                        Differential Verification Triggered:{' '}
+                        Updated Fields:{' '}
                         {formatApiValue(
-                          submitRectificationMutation.data.differential_verification_triggered
+                          submitRectificationMutation.data.updated_fields?.length
+                            ? submitRectificationMutation.data.updated_fields.join(', ')
+                            : undefined
                         )}
                       </div>
                     </div>
@@ -490,7 +481,7 @@ export function ApplicantDossierRectificationPage() {
                   <div className="flex justify-end">
                     <button
                       type="submit"
-                      disabled={submitRectificationMutation.isPending}
+                      disabled={!canRectify || submitRectificationMutation.isPending}
                       className="px-4 py-2 text-xs font-semibold text-white bg-[#C2410C] hover:bg-[#9A3412] disabled:opacity-60 cursor-pointer"
                     >
                       {submitRectificationMutation.isPending
@@ -502,8 +493,9 @@ export function ApplicantDossierRectificationPage() {
               </section>
             </div>
           </div>
+          </>
         )}
       </div>
-    </RequireRole>
+    </>
   );
 }

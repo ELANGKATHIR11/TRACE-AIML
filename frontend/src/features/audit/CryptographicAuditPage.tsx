@@ -8,7 +8,6 @@ import {
   ShieldCheck,
   XCircle,
 } from 'lucide-react';
-import { PersonaRole } from '../../types/api';
 import { fetchAuditLogs, verifyAuditChain } from '../../lib/api/endpoints';
 import { formatApiTimestamp, formatApiValue } from '../../lib/utils/formatters';
 import {
@@ -17,7 +16,6 @@ import {
   ApiLoadingState,
 } from '../../components/ApiStateFeedback';
 import { MerkleChain3DBadge, Tactile3DCard } from '../../components/Tactile3DElements';
-import { RequireRole } from '../identity/IdentityContext';
 
 export function CryptographicAuditPage() {
   const logsQuery = useQuery({
@@ -34,13 +32,12 @@ export function CryptographicAuditPage() {
 
   const logs = logsQuery.data ?? [];
   const verification = verifyMutation.data;
-  const isChainValid =
-    verification?.valid === true ||
-    verification?.is_valid === true ||
-    verification?.status?.toUpperCase() === 'VALID';
+  // normalizeChain sets `valid` from the backend's INTACT/BROKEN status.
+  const isChainValid = verification?.valid === true;
+  const brokenAtId = verification?.broken_at_id;
 
   return (
-    <RequireRole allowedRoles={[PersonaRole.OFFICIAL, PersonaRole.REVIEWER]}>
+    <>
       <div className="space-y-6 animate-dossier-settle">
         {/* Header & Verify Integrity Action */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#CBD5E1] pb-4">
@@ -143,7 +140,12 @@ export function CryptographicAuditPage() {
                 ) : (
                   <>
                     <XCircle className="w-4 h-4 text-[#B91C1C]" aria-hidden="true" />
-                    <span>Backend Reported: Audit Chain Integrity INVALID or Unverified</span>
+                    <span>
+                      Backend Reported: Audit Chain BROKEN
+                      {brokenAtId !== undefined && brokenAtId !== null
+                        ? ` at Event #${String(brokenAtId)}`
+                        : ''}
+                    </span>
                   </>
                 )}
               </div>
@@ -262,6 +264,6 @@ export function CryptographicAuditPage() {
           )}
         </section>
       </div>
-    </RequireRole>
+    </>
   );
 }
