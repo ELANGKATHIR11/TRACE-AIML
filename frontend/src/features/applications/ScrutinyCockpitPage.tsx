@@ -48,6 +48,7 @@ import { StatutoryBanner } from '../../components/StatutoryBanner';
 import { DossierStack3D, Tactile3DCard } from '../../components/Tactile3DElements';
 import { useAuth } from '../auth/AuthContext';
 import { EvidenceCanvasViewer } from '../documents/EvidenceCanvasViewer';
+import { verificationDetail } from './verificationDisplay';
 
 export function ScrutinyCockpitPage() {
   const { id } = useParams<{ id: string }>();
@@ -495,12 +496,7 @@ export function ScrutinyCockpitPage() {
                       </tr>
                     ) : (
                       verificationRows.map((row, idx) => {
-                        const details =
-                          row.details ??
-                          row.provenance ??
-                          (row.reference_id ? `Reference ${row.reference_id}` : undefined) ??
-                          row.checked_at ??
-                          row.verified_at;
+                        const details = verificationDetail(row);
                         return (
                           <tr key={String(row.document_id ?? `row-${idx}`)}>
                             <td className="py-2 px-2.5 font-mono font-semibold text-[#0F1E36]">

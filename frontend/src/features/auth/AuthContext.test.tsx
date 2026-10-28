@@ -13,7 +13,7 @@ vi.mock('../../lib/api/endpoints', () => ({
 }));
 
 import * as endpoints from '../../lib/api/endpoints';
-import { endLocalSession } from '../../lib/api/transport';
+import { ApiClientError, endLocalSession } from '../../lib/api/transport';
 import { RequireAuth, RequireRole, safeNextPath, useAuth } from './AuthContext';
 import { LocationProbe, makeSession, makeUser, renderWithAuth } from '../../test/authTestUtils';
 
@@ -186,18 +186,113 @@ describe('RequireRole', () => {
   });
 });
 
+describe('mid-session password change requirement', () => {
+  function guardedRoutes() {
+    return (
+      <Routes>
+        <Route path="/change-password" element={<LocationProbe />} />
+        <Route
+          path="/audit"
+          element={
+            <RequireAuth>
+              <div>audit page</div>
+            </RequireAuth>
+          }
+        />
+      </Routes>
+    );
+  }
+
+  const passwordChangeRequired = () =>
+    new ApiClientError({ status: 403, detail: 'Password change required', endpoint: '/api/audit/logs' });
+
+  it('a 403 "Password change required" from a query re-fetches the user and redirects', async () => {
+    api.refreshSession.mockResolvedValue(makeSession(makeUser()));
+    api.fetchMe
+      .mockResolvedValueOnce(makeUser())
+      .mockResolvedValue(makeUser({ must_change_password: true }));
+
+    const { queryClient } = renderWithAuth(guardedRoutes(), { path: '/audit' });
+    expect(await screen.findByText('audit page')).toBeInTheDocument();
+
+    await act(async () => {
+      await queryClient
+        .fetchQuery({ queryKey: ['audit-logs'], queryFn: () => Promise.reject(passwordChangeRequired()) })
+        .catch(() => undefined);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/change-password/));
+    expect(api.fetchMe).toHaveBeenCalledTimes(2);
+  });
+
+  it('a 403 "Password change required" from a mutation also triggers the redirect', async () => {
+    api.refreshSession.mockResolvedValue(makeSession(makeUser()));
+    api.fetchMe
+      .mockResolvedValueOnce(makeUser())
+      .mockResolvedValue(makeUser({ must_change_password: true }));
+
+    const { queryClient } = renderWithAuth(guardedRoutes(), { path: '/audit' });
+    expect(await screen.findByText('audit page')).toBeInTheDocument();
+
+    await act(async () => {
+      await queryClient
+        .getMutationCache()
+        .build(queryClient, { mutationFn: () => Promise.reject(passwordChangeRequired()) })
+        .execute(undefined)
+        .catch(() => undefined);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/change-password/));
+  });
+
+  it('other 403s (wrong role) do not re-fetch the user', async () => {
+    api.refreshSession.mockResolvedValue(makeSession(makeUser()));
+    api.fetchMe.mockResolvedValue(makeUser());
+
+    const { queryClient } = renderWithAuth(guardedRoutes(), { path: '/audit' });
+    expect(await screen.findByText('audit page')).toBeInTheDocument();
+
+    await act(async () => {
+      await queryClient
+        .fetchQuery({
+          queryKey: ['admin-users'],
+          queryFn: () =>
+            Promise.reject(
+              new ApiClientError({ status: 403, detail: 'Admin role required', endpoint: '/api/admin/users' }),
+            ),
+        })
+        .catch(() => undefined);
+    });
+
+    expect(api.fetchMe).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('audit page')).toBeInTheDocument();
+  });
+});
+
 describe('safeNextPath', () => {
-  it('rejects anything that is not a same-app relative path', () => {
+  it('rejects anything that does not resolve to this origin', () => {
     expect(safeNextPath('//evil.test')).toBe('/');
     expect(safeNextPath('https://evil.test')).toBe('/');
     expect(safeNextPath('/\\evil.test')).toBe('/');
+    expect(safeNextPath('/\\evil')).toBe('/');
+    expect(safeNextPath('/\t/evil.test')).toBe('/');
+    expect(safeNextPath('/\n/evil.test')).toBe('/');
+    expect(safeNextPath('/\r/evil.test')).toBe('/');
+    expect(safeNextPath('/\u007f/evil.test')).toBe('/');
+    expect(safeNextPath('\t//evil.test')).toBe('/');
+    expect(safeNextPath('javascript:alert(1)')).toBe('/');
     expect(safeNextPath('audit')).toBe('/');
     expect(safeNextPath('')).toBe('/');
     expect(safeNextPath(null)).toBe('/');
   });
 
-  it('keeps same-app paths unchanged', () => {
+  it('keeps same-app paths, including query and hash', () => {
     expect(safeNextPath('/applications/3')).toBe('/applications/3');
-    expect(safeNextPath('/audit?page=2')).toBe('/audit?page=2');
+    expect(safeNextPath('/applications/3?tab=x')).toBe('/applications/3?tab=x');
+    expect(safeNextPath('/audit?page=2#top')).toBe('/audit?page=2#top');
+  });
+
+  it('keeps encoded slashes as a same-origin path', () => {
+    expect(safeNextPath('/%2F%2Fevil.test')).toBe('/%2F%2Fevil.test');
   });
 });

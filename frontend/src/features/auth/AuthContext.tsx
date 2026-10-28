@@ -2,7 +2,7 @@
  * Real authentication (spec §7.2). The session lives in the HttpOnly refresh cookie plus the
  * transport's in-memory access token; this context only mirrors who is signed in.
  */
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
@@ -12,7 +12,7 @@ import {
   logout as apiLogout,
   refreshSession,
 } from '../../lib/api/endpoints';
-import { onAuthFailure } from '../../lib/api/transport';
+import { ApiClientError, onAuthFailure } from '../../lib/api/transport';
 import type { Role } from '../../lib/permissions/roles';
 import type { User } from '../../types/api';
 
@@ -35,15 +35,30 @@ const ANONYMOUS: AuthState = { user: null, status: 'anonymous' };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+/** Control characters (stripped by the WHATWG URL parser, so `/\t/host` reads as `//host`) and `\`. */
+const UNSAFE_NEXT_CHARS = /[\u0000-\u001F\u007F\\]/;
+
 /**
- * Only same-app relative paths are honoured as a post-login destination: the value must start with
- * a single `/` (`//host` and `/\host` are protocol-relative URLs to browsers). Anything else → `/`.
+ * Only same-app paths are honoured as a post-login destination. Prefix checks alone are bypassable,
+ * so the value is resolved the way the browser would and must stay on this origin; the normalised
+ * `pathname + search + hash` is returned. Anything else → `/`.
  */
 export function safeNextPath(next: string | null): string {
-  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/\\')) {
+  if (!next || !next.startsWith('/') || UNSAFE_NEXT_CHARS.test(next)) return '/';
+  let url: URL;
+  try {
+    url = new URL(next, window.location.origin);
+  } catch {
     return '/';
   }
-  return next;
+  if (url.origin !== window.location.origin) return '/';
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+const PASSWORD_CHANGE_REQUIRED = 'Password change required';
+
+function isPasswordChangeRequired(err: unknown): boolean {
+  return err instanceof ApiClientError && err.status === 403 && err.detail === PASSWORD_CHANGE_REQUIRED;
 }
 
 /** Default landing page per role (spec §7.4). */
@@ -105,6 +120,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const me = await fetchMe();
     setState({ user: me, status: 'authenticated' });
   }, []);
+
+  // Spec §8: a mid-session 403 "Password change required" (e.g. after an admin reset) re-reads the
+  // user so `must_change_password` is set and RequireAuth redirects to /change-password. Watched
+  // once here for every query and mutation; concurrent failures share one /me request.
+  const passwordCheckInFlight = useRef<Promise<void> | null>(null);
+  useEffect(() => {
+    const onError = (error: unknown) => {
+      if (!isPasswordChangeRequired(error) || passwordCheckInFlight.current) return;
+      passwordCheckInFlight.current = refreshUser()
+        .catch(() => {
+          // A failing /me ends the session through the transport's auth-failure path.
+        })
+        .finally(() => {
+          passwordCheckInFlight.current = null;
+        });
+    };
+    const unsubscribeQueries = queryClient.getQueryCache().subscribe((event) => {
+      if (event.type === 'updated' && event.action.type === 'error') onError(event.action.error);
+    });
+    const unsubscribeMutations = queryClient.getMutationCache().subscribe((event) => {
+      if (event.type === 'updated' && event.action.type === 'error') onError(event.action.error);
+    });
+    return () => {
+      unsubscribeQueries();
+      unsubscribeMutations();
+    };
+  }, [queryClient, refreshUser]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ user: state.user, status: state.status, login, logout, refreshUser }),
