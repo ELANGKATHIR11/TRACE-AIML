@@ -17,7 +17,7 @@ export default defineConfig(() => {
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
         '/fastapi-proxy': {
-          target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',
+          target: process.env.TRACE_API_ORIGIN || 'http://localhost:8000',
           changeOrigin: true,
           rewrite: (p: string) => p.replace(/^\/fastapi-proxy/, ''),
         },
