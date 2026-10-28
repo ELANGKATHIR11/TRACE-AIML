@@ -72,11 +72,46 @@ def test_rectify_foreign_document_404(client, session, headers, applicant_b, ins
     assert (r.status_code, r.json()) == (404, {"detail": "Document not found"})
 
 
-def test_upload_not_allowed_during_rectification(client, session, headers, applicant_a, inst_a, make_application):
+def test_upload_of_missing_type_allowed_during_rectification(
+    client, session, headers, applicant_a, inst_a, make_application
+):
+    """Ruling R25: a type with no current document may be uploaded to answer 'document missing'."""
     application = make_application(session, inst_a, status=ApplicationStatus.RECTIFICATION_REQUESTED)
-    r = _upload(client, headers(applicant_a), application.id)
+    r = _upload(client, headers(applicant_a), application.id, document_type="FIRE_SAFETY_CERTIFICATE")
+    assert r.status_code == 201, r.text
+    session.refresh(application)
+    assert application.status == ApplicationStatus.RECTIFICATION_REQUESTED
+    assert "DOCUMENT_UPLOADED" in _audit_actions(session, application.id)
+
+
+def test_upload_of_present_type_during_rectification_409(
+    client, session, headers, applicant_a, inst_a, make_application, make_document
+):
+    """A type that already has a current document is replaced through rectify, not upload."""
+    application = make_application(session, inst_a, status=ApplicationStatus.RECTIFICATION_REQUESTED)
+    existing = make_document(session, application, DocumentType.AFFIDAVIT)
+    r = _upload(client, headers(applicant_a), application.id, document_type="AFFIDAVIT")
     assert r.status_code == 409
     assert r.json()["current_status"] == "RECTIFICATION_REQUESTED"
+    session.expire_all()
+    current = session.exec(
+        select(Document).where(Document.application_id == application.id)
+    ).all()
+    assert [d.id for d in current] == [existing.id]
+    assert current[0].superseded_by_id is None
+
+
+@pytest.mark.parametrize(
+    "status",
+    [ApplicationStatus.SUBMITTED, ApplicationStatus.READY_FOR_REVIEW, ApplicationStatus.APPROVED_BY_REVIEWER],
+)
+def test_upload_not_allowed_outside_editable_statuses(
+    client, session, headers, applicant_a, inst_a, make_application, status
+):
+    application = make_application(session, inst_a, status=status)
+    r = _upload(client, headers(applicant_a), application.id, document_type="FIRE_SAFETY_CERTIFICATE")
+    assert r.status_code == 409
+    assert r.json()["current_status"] == status.value
 
 
 def test_draft_reupload_supersedes_same_type(client, session, headers, applicant_a, inst_a, make_application):

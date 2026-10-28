@@ -10,7 +10,12 @@ from app.models.models import Institution, User
 from app.schemas.schemas import AdminUserCreate, AdminUserUpdate, UserRead
 from app.services import tokens
 from app.services.audit_service import log_audit_event
-from app.services.security import hash_password, require_roles, validate_password_policy
+from app.services.security import (
+    find_user_by_email,
+    hash_password,
+    require_roles,
+    validate_password_policy,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
@@ -46,7 +51,7 @@ def create_user(
 ):
     _check_role_institution(session, payload.role, payload.institution_id)
     _check_password(payload.temporary_password, payload.email)
-    if session.exec(select(User).where(User.email == payload.email)).first() is not None:
+    if find_user_by_email(session, payload.email) is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "A user with this email already exists")
 
     user = User(

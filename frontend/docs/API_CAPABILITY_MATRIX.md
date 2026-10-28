@@ -16,7 +16,7 @@ A = applicant (own institution), R = reviewer, Ad = admin. Authorization is enfo
 | `POST /api/applications/{id}/validate` | no | yes | yes |
 | `POST /api/applications/{id}/agent-review` | no | yes | yes |
 | `POST /api/applications/{id}/decision` | no | yes | no |
-| `POST /api/documents/upload` | own, editable | no | no |
+| `POST /api/documents/upload` | own; `DRAFT` (any type), or `RECTIFICATION_REQUESTED` for a type with no current document | no | no |
 | `POST /api/documents/{id}/rectify` | own, `RECTIFICATION_REQUESTED` | no | no |
 | `GET /api/documents/application/{id}`, `/{id}`, `/{id}/preview` | own | yes | yes |
 | `GET /api/documents/{id}/ela`, `POST /api/documents/{id}/verify` | no | yes | yes |

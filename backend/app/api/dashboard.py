@@ -6,7 +6,6 @@ import json
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import or_
 from sqlmodel import Session, col, func, select
 
 from app.database import get_db
@@ -15,6 +14,7 @@ from app.models.models import Application, AuditLog, Document, User, ValidationF
 from app.services.ml_training_platform import ml_training_platform
 from app.services.ollama_service import ollama_service
 from app.services.access import require_staff
+from app.services import workflow
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
@@ -145,10 +145,7 @@ def get_dashboard_metrics(
 
     # Flags on superseded documents are history, not open findings: count application-level
     # flags and flags on current documents only.
-    current_flag = or_(
-        col(ValidationFlag.document_id).is_(None),
-        col(ValidationFlag.document_id).in_(select(Document.id).where(col(Document.superseded_by_id).is_(None))),
-    )
+    current_flag = workflow.current_flag_condition()
     total_flags = db.exec(select(func.count(ValidationFlag.id)).where(current_flag)).one()
     critical_flags = db.exec(select(func.count(ValidationFlag.id)).where(current_flag).where(ValidationFlag.severity == FlagSeverity.CRITICAL)).one()
     resolved_flags = db.exec(select(func.count(ValidationFlag.id)).where(current_flag).where(ValidationFlag.is_resolved == True)).one()

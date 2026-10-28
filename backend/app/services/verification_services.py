@@ -8,13 +8,13 @@ Combines:
 """
 
 import logging
-from pathlib import Path
 from typing import Any, Dict
 
-from sqlmodel import Session, select
+from sqlalchemy import delete as sa_delete
+from sqlmodel import Session, col, select
 
 from app.models.enums import ApplicationStatus, FlagCategory, FlagSeverity, VerificationStatus
-from app.models.models import Application, ChecklistRule, Document, ValidationFlag, utc_now
+from app.models.models import Application, Document, ValidationFlag, utc_now
 from app.services import workflow
 from app.services.audit_service import log_audit_event
 from app.services.document_storage import ela_on_bytes, read_document_plaintext
@@ -105,7 +105,7 @@ class VerificationService:
         app_obj = db.get(Application, document.application_id)
         declared_data = app_obj.declared_data if app_obj else {}
 
-        active_rules = db.exec(select(ChecklistRule).where(ChecklistRule.is_active == True)).all()
+        active_rules = workflow.category_rules(db, app_obj) if app_obj else []
         rule_flags = rules_engine.evaluate_document_rules(document, active_rules, declared_data)
 
         for rf in rule_flags:
@@ -159,7 +159,7 @@ class VerificationService:
         workflow.ensure_status(application, workflow.REVIEWABLE, "validate")
 
         documents = workflow.current_documents(db, application_id)
-        active_rules = db.exec(select(ChecklistRule).where(ChecklistRule.is_active == True)).all()
+        active_rules = workflow.category_rules(db, application)
 
         # Step A: Ensure all uploaded documents have been parsed
         for doc in documents:
@@ -172,7 +172,20 @@ class VerificationService:
         # Step B: Run Multi-Document Regulatory Compliance
         compliance = rules_engine.evaluate_application_compliance(application, documents, active_rules)
 
-        # Record cross-document flags in DB
+        if compliance["overall_status"] == "NON_COMPLIANT_CRITICAL_DEFICITS":
+            target = ApplicationStatus.DEFICIENCY_FLAGGED
+        else:
+            target = ApplicationStatus.READY_FOR_REVIEW
+        # Takes the write lock first, so the flag replacement below cannot interleave with another
+        # validation of the same application.
+        workflow.transition(db, application, target, allowed_from=workflow.REVIEWABLE)
+
+        # Replace the previous run's cross-document (application-level) flags with this run's.
+        db.execute(
+            sa_delete(ValidationFlag)
+            .where(col(ValidationFlag.application_id) == application_id)
+            .where(col(ValidationFlag.document_id).is_(None))
+        )
         for flag_data in compliance.get("flags", []):
             flag = ValidationFlag(
                 application_id=application_id,
@@ -185,14 +198,8 @@ class VerificationService:
                 is_advisory=True,
             )
             db.add(flag)
-
-        # Update application validation summary and state
         application.validation_summary = compliance
-        if compliance["overall_status"] == "NON_COMPLIANT_CRITICAL_DEFICITS":
-            target = ApplicationStatus.DEFICIENCY_FLAGGED
-        else:
-            target = ApplicationStatus.READY_FOR_REVIEW
-        workflow.transition(db, application, target, allowed_from=workflow.REVIEWABLE)
+        db.add(application)
 
         # Commits the flags, summary and status change together with the audit entry.
         log_audit_event(
@@ -205,24 +212,11 @@ class VerificationService:
             details=compliance,
         )
 
-        # Automatically generate default Visual AI Forensic Audit Report with highlighted screenshots
-        visual_report_path = None
-        visual_report_markdown = None
-        try:
-            from generate_visual_ai_report import build_detailed_visual_ai_report
-            visual_report_path = str(build_detailed_visual_ai_report(application.id))
-            if Path(visual_report_path).exists():
-                visual_report_markdown = Path(visual_report_path).read_text(encoding="utf-8")
-        except Exception as e:
-            logger.warning(f"Could not auto-generate visual AI report: {e}")
-
         return {
             "application_id": application.id,
             "application_number": application.application_number,
             "status": application.status.value,
             "compliance": compliance,
-            "default_ai_report_path": visual_report_path,
-            "default_ai_report_markdown": visual_report_markdown,
         }
 
 

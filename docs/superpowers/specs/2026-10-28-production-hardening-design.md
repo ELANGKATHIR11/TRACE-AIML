@@ -205,7 +205,7 @@ A = applicant (own institution), R = reviewer, Ad = admin.
 | `POST /api/applications/{id}/validate` | ✗ | ✓ | ✓ |
 | `POST /api/applications/{id}/agent-review` | ✗ | ✓ | ✓ |
 | `POST /api/applications/{id}/decision` | ✗ | ✓ | ✗ |
-| `POST /api/documents/upload` | own, editable | ✗ | ✗ |
+| `POST /api/documents/upload` | own; `DRAFT` (any type), or `RECTIFICATION_REQUESTED` for a type with no current document (R25) | ✗ | ✗ |
 | `POST /api/documents/{id}/rectify` | own, `RECTIFICATION_REQUESTED` | ✗ | ✗ |
 | `GET /api/documents/application/{id}`, `/{id}`, `/{id}/preview` | own | ✓ | ✓ |
 | `GET /api/documents/{id}/ela`, `POST /api/documents/{id}/verify` | ✗ | ✓ | ✓ |
@@ -325,7 +325,7 @@ READY_FOR_REVIEW | DEFICIENCY_FLAGGED --decision(R)--> APPROVED_BY_REVIEWER | RE
 RECTIFICATION_REQUESTED --rectify(A)*, submit-rectification(A)--> SUBMITTED
 ```
 
-- Applicant-editable statuses: `DRAFT` (upload), `RECTIFICATION_REQUESTED` (rectify).
+- Applicant-editable statuses: `DRAFT` (upload; a re-upload supersedes the current document of that type), `RECTIFICATION_REQUESTED` (rectify an existing document; upload only a type with no current document, else 409 — ruling R25).
 - `validate` allowed from `SUBMITTED`, `READY_FOR_REVIEW`, `DEFICIENCY_FLAGGED`.
 - `agent-review` allowed from `SUBMITTED`, `READY_FOR_REVIEW`, `DEFICIENCY_FLAGGED`; it does not
   change status (the current code silently sets `READY_FOR_REVIEW` on failure).

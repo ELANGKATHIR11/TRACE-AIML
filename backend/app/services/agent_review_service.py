@@ -9,7 +9,7 @@ Output is advisory only and is recorded in the audit log.
 import logging
 from typing import Any, Dict, List
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.models.models import Application, ValidationFlag
 from app.services import workflow
@@ -48,7 +48,7 @@ class AgentReviewService:
             }
 
         docs = workflow.current_documents(db, application_id)
-        flags = db.exec(select(ValidationFlag).where(ValidationFlag.application_id == application_id)).all()
+        flags = workflow.current_flags(db, application_id)
         if not flags and not docs:
             return {"available": True, "reason": "No documents or findings to review yet.", "steps": []}
 

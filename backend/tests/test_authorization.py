@@ -113,7 +113,7 @@ MATRIX = [
         ADMIN_ONLY,
         {
             "json": {
-                "email": "matrix.user@example.test",
+                "email": "matrix.user@example.org",
                 "full_name": "Matrix User",
                 "role": "reviewer",
                 "temporary_password": "Temporary-Pass-123",

@@ -150,10 +150,14 @@ async def upload_document(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_applicant),
 ):
-    """Upload a supporting document to a DRAFT; a re-upload supersedes the current one of its type."""
+    """Upload a supporting document.
+
+    DRAFT: any type; a re-upload supersedes the current one of its type. RECTIFICATION_REQUESTED:
+    only a type with no current document (an existing one is replaced through rectify).
+    """
     application = load_application(db, application_id, current_user, write=True)
-    workflow.ensure_status(application, workflow.UPLOADABLE, "upload documents to")
     doc_type_enum = parse_document_type(document_type)
+    workflow.ensure_uploadable(db, application, doc_type_enum)
 
     doc = await _ingest_document(db, application, doc_type_enum, file, current_user)
 
@@ -161,7 +165,7 @@ async def upload_document(
     # and these changes commit together with the audit entry below.
     acquire_write_lock(db)
     db.refresh(application)
-    workflow.ensure_status(application, workflow.UPLOADABLE, "upload documents to")
+    workflow.ensure_uploadable(db, application, doc_type_enum, new_document_id=doc.id)
     replaced = [
         d for d in workflow.current_documents(db, application_id)
         if d.document_type == doc_type_enum and d.id != doc.id

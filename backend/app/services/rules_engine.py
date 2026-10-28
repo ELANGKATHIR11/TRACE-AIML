@@ -142,8 +142,9 @@ class RulesEngine:
 
         if total_students and proven_faculty:
             s_num = self._extract_first_number(total_students)
-            f_num = float(proven_faculty)
-            if s_num and f_num > 0:
+            # LLM-extracted counts may be text such as "32 faculty".
+            f_num = self._extract_first_number(proven_faculty)
+            if s_num and f_num and f_num > 0:
                 sfr = s_num / f_num
                 # AICTE Standard SFR is 1:20 (or 1:15 for PG)
                 if sfr > 20.0:

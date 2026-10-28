@@ -14,3 +14,17 @@ def test_generated_outputs_are_ignored():
 def test_no_uploads_tracked():
     out = subprocess.run(["git", "ls-files", "backend/uploads", "reports", "backend/reports"], cwd=ROOT, capture_output=True, text=True).stdout
     assert out.strip() == ""
+
+def test_playwright_mcp_output_is_ignored():
+    assert _ignored(".playwright-mcp/page-snapshot.yml")
+
+def test_backend_dependencies():
+    import tomllib
+    deps = tomllib.loads((ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+    names = [d.split(">")[0].split("[")[0].split("=")[0].strip().lower() for d in deps]
+    assert "passlib" not in names  # unused; bcrypt is used directly
+    assert "email-validator" in names  # backs pydantic EmailStr
+
+def test_readme_has_no_alembic_stamp_advice():
+    # Stamping a pre-migration database would keep its old seeded demo accounts.
+    assert "alembic stamp" not in (ROOT / "README.md").read_text(encoding="utf-8")

@@ -196,3 +196,29 @@ def test_migration_backfills_existing_rows(tmp_path):
             assert verify_chain(s)["status"] == "INTACT"
     finally:
         engine.dispose()
+
+
+def test_non_ascii_record_hash_edit_breaks_chain(client, session, headers, reviewer):
+    first = log_audit_event(session, action_type="T", entity_type="Thing", summary="s0")
+    entry = log_audit_event(session, action_type="T", entity_type="Thing", summary="s1")
+    session.connection().execute(
+        text("UPDATE audit_logs SET record_hash=:h WHERE id=:id"), {"h": "é" * 64, "id": entry.id}
+    )
+    session.commit()
+    r = client.get("/api/audit/verify-chain", headers=headers(reviewer))
+    assert r.status_code == 200, r.text
+    assert (r.json()["status"], r.json()["broken_at_id"]) == ("BROKEN", entry.id)
+    assert r.json()["latest_hash"] == first.record_hash
+
+
+def test_unparsable_timestamp_breaks_chain_at_that_row(session):
+    for i in range(3):
+        log_audit_event(session, action_type="T", entity_type="Thing", summary=f"s{i}")
+    ids = [row.id for row in _all_rows(session)]
+    session.connection().execute(
+        text("UPDATE audit_logs SET timestamp='not a timestamp' WHERE id=:id"), {"id": ids[1]}
+    )
+    session.commit()
+    session.expire_all()
+    result = verify_chain(session)
+    assert (result["status"], result["broken_at_id"], result["verified_count"]) == ("BROKEN", ids[1], 1)

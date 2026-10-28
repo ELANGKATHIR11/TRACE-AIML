@@ -15,7 +15,7 @@ Combines:
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 try:
     from langgraph.graph import StateGraph, END  # type: ignore
@@ -31,7 +31,7 @@ try:
 except ImportError:
     HAS_CREWAI = False
 
-from app.models.models import Application, ValidationFlag
+from app.models.models import Application
 from app.services import workflow
 from app.services.ollama_service import ollama_service
 from app.services.vector_rag_service import vector_rag_service
@@ -211,16 +211,17 @@ def evidence_compiler_node(state: ScrutinyState) -> ScrutinyState:
 # Compile LangGraph StateGraph DAG
 # -------------------------------------------------------------------------
 if HAS_LANGGRAPH and StateGraph is not None:
-    workflow = StateGraph(ScrutinyState)
-    workflow.add_node("forensic_auditor", forensic_auditor_node)
-    workflow.add_node("compliance_officer", compliance_officer_node)
-    workflow.add_node("evidence_compiler", evidence_compiler_node)
+    # Not named `workflow`: that would shadow the app.services.workflow module used below.
+    graph_builder = StateGraph(ScrutinyState)
+    graph_builder.add_node("forensic_auditor", forensic_auditor_node)
+    graph_builder.add_node("compliance_officer", compliance_officer_node)
+    graph_builder.add_node("evidence_compiler", evidence_compiler_node)
 
-    workflow.set_entry_point("forensic_auditor")
-    workflow.add_edge("forensic_auditor", "compliance_officer")
-    workflow.add_edge("compliance_officer", "evidence_compiler")
-    workflow.add_edge("evidence_compiler", END)
-    orchestrated_scrutiny_graph = workflow.compile()
+    graph_builder.set_entry_point("forensic_auditor")
+    graph_builder.add_edge("forensic_auditor", "compliance_officer")
+    graph_builder.add_edge("compliance_officer", "evidence_compiler")
+    graph_builder.add_edge("evidence_compiler", END)
+    orchestrated_scrutiny_graph = graph_builder.compile()
 else:
     orchestrated_scrutiny_graph = None
 
@@ -241,7 +242,7 @@ class MultiAgentWorkflowService:
             raise ValueError(f"Application #{application_id} not found")
 
         docs = workflow.current_documents(db, application_id)
-        flags = db.exec(select(ValidationFlag).where(ValidationFlag.application_id == application_id)).all()
+        flags = workflow.current_flags(db, application_id)
 
         initial_state: ScrutinyState = {
             "application_id": application_id,

@@ -12,7 +12,6 @@ from app.models.models import (
     Institution,
     OfficerDecision,
     User,
-    ValidationFlag,
 )
 from app.schemas.schemas import (
     ApplicationCreate,
@@ -388,15 +387,12 @@ def validate_application(
     """
     from app.services.verification_services import verification_service
 
-    load_application(session, application_id, current_user)
-    try:
-        result = verification_service.verify_entire_application(session, application_id)
-        return {
-            "message": "Full application validation completed successfully",
-            "result": result,
-        }
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    load_application(session, application_id, current_user)  # 404 for unknown / not visible
+    result = verification_service.verify_entire_application(session, application_id)
+    return {
+        "message": "Full application validation completed successfully",
+        "result": result,
+    }
 
 
 @router.get("/applications/{application_id}/flags", tags=["Institutions & Applications (PRD §4.1)"])
@@ -405,12 +401,12 @@ def get_application_flags(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    """Retrieve all explainable compliance, statutory, and forensic flags for an application."""
+    """Explainable compliance, statutory and forensic flags on the application's current dossier.
+
+    Flags of superseded documents are history and are not returned.
+    """
     load_application(session, application_id, current_user)
-    flags = session.exec(
-        select(ValidationFlag).where(ValidationFlag.application_id == application_id)
-    ).all()
-    return flags
+    return workflow.current_flags(session, application_id)
 
 
 @router.post(

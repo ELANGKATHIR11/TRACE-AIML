@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import and_, not_
 from sqlalchemy import update as sa_update
-from sqlmodel import Session, select
+from sqlmodel import Session
 
 from app.config import settings
 from app.database import get_session
@@ -17,6 +17,7 @@ from app.services import tokens
 from app.services.audit_service import log_audit_event
 from app.services.rate_limit import SlidingWindowLimiter
 from app.services.security import (
+    find_user_by_email,
     get_current_user,
     hash_password,
     validate_password_policy,
@@ -188,7 +189,7 @@ def login(
             detail="Too many login attempts. Try again later.",
         )
 
-    user = session.exec(select(User).where(User.email == form_data.username)).first()
+    user = find_user_by_email(session, form_data.username)
     if user is None:
         verify_password(form_data.password, _DUMMY_PASSWORD_HASH)
         _audit_login_failed(session, None, "unknown_account", ip)

@@ -115,25 +115,62 @@ def log_audit_event(
 
 
 def verify_chain(session: Session) -> Dict[str, Any]:
-    """Walk the chain by id, recomputing every HMAC and every prev_hash link."""
+    """Walk the chain by id, recomputing every HMAC and every prev_hash link.
+
+    A row that cannot be loaded or hashed (e.g. a tampered, unparsable timestamp) breaks the chain
+    at that row rather than failing the request.
+    """
     expected_prev = GENESIS_HASH
     verified = 0
     latest_hash: Optional[str] = None
     broken_at_id: Optional[int] = None
+    last_id = 0
+
+    def accept(row: AuditLog) -> bool:
+        """Advance the walk past `row` if it is intact; False marks the chain broken there."""
+        nonlocal expected_prev, verified, latest_hash, last_id
+        try:
+            stored = row.record_hash or ""
+            # Compare bytes: compare_digest rejects non-ASCII str, and a tampered hash may be any text.
+            intact = row.prev_hash == expected_prev and hmac.compare_digest(
+                stored.encode("utf-8"), compute_record_hash(row).encode("utf-8")
+            )
+        except Exception:
+            intact = False
+        if intact:
+            verified += 1
+            last_id = row.id
+            latest_hash = expected_prev = stored
+        return intact
 
     rows = session.exec(
         select(AuditLog).order_by(col(AuditLog.id)).execution_options(yield_per=500)
     )
-    for row in rows:
-        stored = row.record_hash or ""
-        if row.prev_hash != expected_prev or not hmac.compare_digest(
-            stored, compute_record_hash(row)
-        ):
-            broken_at_id = row.id
-            break
-        verified += 1
-        latest_hash = expected_prev = stored
-    rows.close()
+    try:
+        for row in rows:
+            if not accept(row):
+                broken_at_id = row.id
+                break
+        load_failed = False
+    except Exception:
+        # A row in the current batch could not be loaded; locate it row by row below.
+        load_failed = True
+    finally:
+        rows.close()
+
+    if load_failed:
+        remaining = session.exec(
+            select(AuditLog.id).where(col(AuditLog.id) > last_id).order_by(col(AuditLog.id))
+        ).all()
+        for row_id in remaining:
+            try:
+                row = session.exec(select(AuditLog).where(AuditLog.id == row_id)).one()
+            except Exception:
+                broken_at_id = row_id
+                break
+            if not accept(row):
+                broken_at_id = row_id
+                break
 
     return {
         "status": "INTACT" if broken_at_id is None else "BROKEN",

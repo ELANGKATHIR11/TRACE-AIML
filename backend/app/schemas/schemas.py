@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Annotated, Any, Dict, List, Optional
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.enums import (
     ApplicationCategory,
@@ -15,6 +15,10 @@ from app.models.enums import (
 
 
 # --- Auth & User Schemas ---
+# A syntactically valid address, trimmed and lower-cased (accounts are matched case-insensitively).
+NormalizedEmail = Annotated[EmailStr, AfterValidator(str.lower)]
+
+
 class UserRead(BaseModel):
     id: int
     email: str
@@ -42,7 +46,7 @@ class ChangePasswordRequest(BaseModel):
 class AdminUserCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    email: str = Field(min_length=3, max_length=254)
+    email: NormalizedEmail
     full_name: str = Field(min_length=1, max_length=200)
     role: UserRole
     institution_id: Optional[int] = None

@@ -17,13 +17,21 @@ def _generate_keys() -> int:
 
 
 def _create_admin(email: str, full_name: str) -> int:
-    from sqlmodel import Session, select
+    from pydantic import TypeAdapter, ValidationError
+    from sqlmodel import Session
 
     from app.database import get_engine
     from app.models.enums import UserRole
     from app.models.models import User
+    from app.schemas.schemas import NormalizedEmail
     from app.services.audit_service import log_audit_event
-    from app.services.security import hash_password, validate_password_policy
+    from app.services.security import find_user_by_email, hash_password, validate_password_policy
+
+    try:
+        email = TypeAdapter(NormalizedEmail).validate_python(email)
+    except ValidationError:
+        print(f"Invalid email address: {email!r}", file=sys.stderr)
+        return 1
 
     password = getpass.getpass("Password: ")
     if password != getpass.getpass("Confirm password: "):
@@ -36,7 +44,7 @@ def _create_admin(email: str, full_name: str) -> int:
         return 1
 
     with Session(get_engine()) as session:
-        if session.exec(select(User).where(User.email == email)).first() is not None:
+        if find_user_by_email(session, email) is not None:
             print(f"A user with email {email} already exists", file=sys.stderr)
             return 1
         user = User(

@@ -1,7 +1,7 @@
 # AICTE TRACE: Autonomous Regulatory Compliance & Forensic Document Authentication Platform
 ### Smart India Hackathon 2026 | Problem Statement ID: 26261 | Organization: AICTE (Regulation Bureau)
 
-[![Python: 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
+[![Python: 3.14](https://img.shields.io/badge/Python-3.14-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green.svg)](https://fastapi.tiangolo.com/)
 [![Local LLM: Ollama](https://img.shields.io/badge/Ollama-qwen2.5%3A1.5b--instruct-orange.svg)](https://ollama.com/)
 [![Security: AES-256-GCM](https://img.shields.io/badge/Security-AES--256--GCM-red.svg)]()
@@ -24,9 +24,9 @@ Every year, technical institutions across India submit tens of thousands of comp
 TRACE delivers an automated, evidence-grounded screening pipeline operating **100% locally on-premises without external cloud APIs**:
 1. **Multi-Source Ingestion (6 Streams):** Ingests portal declarations, certificate files (PDF/PNG/JPEG), infrastructure floor plans and walkthrough videos (OpenCV frame sampling), historical AICTE databases, official issuing-authority verification gateways, and Approval Process Handbook (APH) regulatory rules.
 2. **Multi-Channel Issuing Authority Hub:** Connects to 5 statutory issuing registries (`DIGILOCKER_ESTAMP`, `STATE_BHULEKH`, `FIRE_PORTAL`, `AICTE_NBA_PORTAL`, `FACULTY_REGISTRY`), inspects PDF PKCS#7/PAdES digital signatures, and decodes QR code payloads, mapping results into all 6 statutory states (`VERIFIED`, `MISMATCH`, `EXPIRED`, `PENDING`, `SOURCE_UNAVAILABLE`, `MANUAL_REVIEW_REQUIRED`).
-3. **Forensic & Machine Learning Inspection:** Employs Error Level Analysis (ELA), scikit-learn TF-IDF document classification, Random Forest forgery detection, and PyMuPDF vector span parsing with dynamic red bounding-box page preview overlays (`/api/documents/{id}/preview`).
+3. **Forensic & Machine Learning Inspection:** Employs Error Level Analysis (ELA), scikit-learn TF-IDF document classification, Random Forest forgery detection, and PyMuPDF vector span parsing, with an authenticated, decrypted document preview (`/api/documents/{id}/preview`).
 4. **Local Vector RAG & Grounded AI Review:** Indexes official APH clauses in ChromaDB for semantic retrieval, paired with an offline 3-role AI advisory review team running on local Ollama (`qwen2.5:1.5b-instruct`).
-5. **Closed-Loop Rectification Workflow:** Allows applicants to view identified deficiencies, upload replacement certificates, amend declared metrics, and trigger automated re-validation prior to final administrative action.
+5. **Closed-Loop Rectification Workflow:** Allows applicants to view identified deficiencies, upload missing or replacement certificates, amend declared metrics, and resubmit; a reviewer then re-runs validation before final administrative action.
 6. **Standalone Enterprise Headless Backend API:** A robust, high-performance RESTful API architecture providing OpenAPI/Swagger interactive endpoints, automated JSON scrutiny packages, and zero frontend dependencies for seamless integration into any client portal.
 
 > **Statutory Safeguard (PRD & SIH 26261):** All AI inferences, tamper alerts, and compliance flags are strictly **advisory decision-support signals**. Statutory scrutiny, physical inspections where required, and final regulatory determinations remain exclusively with competent AICTE authorities.
@@ -50,14 +50,14 @@ graph TB
     subgraph L1 ["LAYER 1: REST API & OPENAPI SWAGGER SPECIFICATION"]
         direction TB
         C1["AICTE Portal Client Integration<br/>- Stream 1 Institutional Declaration<br/>- Closed-Loop Rectification Payloads<br/>- Application Tracking & Status Endpoints"]:::clientLayer
-        C2["Bureau Scrutiny & Regulatory Gateway<br/>- Dual-Pane Evidence Endpoints<br/>- Dynamic Red Bounding Box Page PNG Previews<br/>- Side-by-Side Authority Record Comparison APIs"]:::clientLayer
+        C2["Bureau Scrutiny & Regulatory Gateway<br/>- Dual-Pane Evidence Endpoints<br/>- Authenticated Decrypted Document Previews<br/>- Side-by-Side Authority Record Comparison APIs"]:::clientLayer
         C3["Vigilance & Admin Intelligence Endpoints<br/>- Handbook Semantic RAG Search (`/api/rag/search`)<br/>- ML Model Registry & Performance Metrics (`/api/models/metrics`)<br/>- Grounded 3-Role AI Advisory Reviews<br/>- SHA-256 Tamper-Evident Merkle Ledger (`/api/audit/verify-chain`)"]:::clientLayer
     end
 
     %% LAYER 2: SECURITY & ZERO-TRUST GATEWAY
     subgraph L2 ["LAYER 2: ZERO-TRUST ACCESS GATEWAY & STORAGE VAULT"]
         direction TB
-        S1["RBAC & Public Privilege Escalation Guard<br/>Strict Public Applicant Registration · Admin-Provisioned Officers"]:::securityLayer
+        S1["RBAC & Privilege Escalation Guard<br/>No Public Registration · Admin-Provisioned Accounts"]:::securityLayer
         S2["Institutional IDOR Data Isolation Shield<br/>Institution-Scoped Scrutiny · Cross-Institution Access Denied"]:::securityLayer
         S3["At-Rest AES-256-GCM Cryptographic Storage<br/>Encrypted PDF & Image Vault · 96-bit Nonce + 128-bit Auth Tag"]:::securityLayer
         S4["Magic-Byte & Polyglot File Defense<br/>Header Verification (%PDF-, PNG, JPEG) · Shellcode Disarmed"]:::securityLayer
@@ -98,7 +98,7 @@ graph TB
     %% LAYER 6: COURT-READY EVIDENCE & AUDIT LEDGER
     subgraph L6 ["LAYER 6: COURT-READY EVIDENCE & TAMPER-EVIDENT AUDIT"]
         direction TB
-        E1["Dynamic Red Bounding Box Page Previews<br/>Decrypted PNG Render with Targeted Evidence Marks"]:::ledgerLayer
+        E1["Authenticated Document Preview<br/>Decrypted Inline Render · Never Cached"]:::ledgerLayer
         E2["Evidence-Linked Finding Deficiencies<br/>Advisory Flags Linked to Clauses, Sources & Fields"]:::ledgerLayer
         E3["Tamper-Evident SHA-256 Merkle Ledger<br/>Cryptographically Chained Audit Trail with Verification"]:::ledgerLayer
     end
@@ -125,7 +125,7 @@ graph TB
 
 ## 3. Technology Stack & Packages
 
-### Backend (Python 3.11 Air-Gapped Environment)
+### Backend (Python 3.14 Air-Gapped Environment)
 | Category | Library / Tool | Exact Role in Platform |
 | :--- | :--- | :--- |
 | **Framework & API** | `fastapi`, `uvicorn`, `starlette` | High-performance asynchronous REST API runtime |
@@ -154,10 +154,10 @@ graph TB
 - Evaluates **PDF PKCS#7 / PAdES digital signatures** and **2D QR payloads**.
 - Returns one of the 6 statutory verification outcomes: `VERIFIED`, `MISMATCH`, `EXPIRED`, `PENDING`, `SOURCE_UNAVAILABLE`, `MANUAL_REVIEW_REQUIRED`.
 
-### 2. Live Page Rendering with Red Bounding Box Overlays
-- **Endpoint:** `GET /api/documents/{document_id}/preview?page=0&mark=term1&mark=term2`
-- Decrypts the stored AES-256-GCM file on-the-fly and renders the requested page as an authenticated PNG.
-- Automatically searches for matched words or evidence snippets and draws highlighted red bounding boxes directly on the document image.
+### 2. Authenticated Document Preview
+- **Endpoint:** `GET /api/documents/{document_id}/preview`
+- Decrypts the stored AES-256-GCM file in memory and returns the original document inline (`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`).
+- Access follows the document's own scoping: applicants see only their institution's documents.
 
 ### 3. Golden Dossiers & Seed Records
 - **Service:** `backend/app/services/golden_dossiers_service.py`
@@ -175,42 +175,44 @@ graph TB
   - **Evidence Compiler:** Synthesizes observations and compiles physical inspection (EVC) recommendations.
 
 ### 5. Closed-Loop Rectification
+- Available while the application is `RECTIFICATION_REQUESTED`.
 - **Endpoints:**
-  - `POST /api/documents/{document_id}/rectify`: Uploads a replacement document for a deficient record.
-  - `POST /api/applications/{application_id}/submit-rectification`: Updates declared metrics and re-triggers automated validation.
+  - `POST /api/documents/{document_id}/rectify`: Uploads a replacement for a current document; the old one is kept as superseded.
+  - `POST /api/documents/upload`: Uploads a document type that has **no** current document (e.g. to answer "document missing"); a type that already has one must be replaced through `rectify` (`409` otherwise).
+  - `POST /api/applications/{application_id}/submit-rectification`: Merges amended declared metrics and returns the application to `SUBMITTED`. It does not run validation itself; a reviewer re-runs `POST /api/applications/{application_id}/validate`.
 
 ---
 
 ## 5. Verification & Acceptance Testing
 
-The platform includes a master automated verification suite covering all statutory requirements:
+The backend suite lives in `backend/tests/` and runs against a temporary SQLite database built by the Alembic migrations (no Ollama, ChromaDB or network needed); the frontend suite runs with Vitest.
 
 ```bash
-# Execute Master Verification Suite
-cd backend
-python -m pytest -v test_master_verification_suite.py
+cd backend && uv run python -m pytest -q          # backend/tests/
+cd frontend && npm test                            # Vitest (src/**/*.test.ts[x])
 ```
 
-### Verification Suite Coverage (12/12 Passing):
-1. `test_public_registration_privilege_escalation_blocked`: Strict public registration checks.
-2. `test_idor_cross_institution_protection`: Cross-institution data segregation.
-3. `test_tamper_evident_merkle_chain`: SHA-256 chained audit trail integrity.
-4. `test_offline_aes256_gcm_storage_and_decryption`: Cryptographic at-rest encryption.
-5. `test_vector_rag_retrieval`: ChromaDB semantic retrieval of APH clauses.
-6. `test_real_ml_document_and_forgery_classifiers`: Real model evaluation against registered weights.
-7. `test_issuing_authority_hub_six_statutory_states`: All 6 issuing authority verification outcomes.
-8. `test_infrastructure_cv_floor_plan_and_evc_triage`: Room dimension parsing and EVC inspection checks.
-9. `test_golden_dossiers_and_closed_loop_rectification`: End-to-end dossier seeding and rectification.
-10. `test_ml_endpoints_use_real_registry`: ML registry metrics reporting.
-11. `test_rag_search_returns_cited_clauses`: Semantic RAG search endpoint.
-12. `test_preview_renders_page_and_marks_terms`: Live page preview generation with red bounding box highlights.
+### Backend suite (`backend/tests/`)
+| File | Covers |
+| :--- | :--- |
+| `test_auth.py`, `test_tokens.py` | Login, lockout and rate limiting, access/refresh tokens, rotation and reuse detection, password change |
+| `test_admin_users.py` | Admin user management, e-mail normalisation, the `create-admin` CLI |
+| `test_authorization.py` | Role matrix and institution (IDOR) isolation for every endpoint |
+| `test_lifecycle.py`, `test_rectification.py` | Application lifecycle (submit, validate, decision), rectification and uploads |
+| `test_validation.py` | Validation flags (current/superseded), category-scoped checklist rules, compliance parsing |
+| `test_audit_chain.py` | HMAC-chained audit log, tamper detection, concurrent writers |
+| `test_documents_storage.py` | AES-256-GCM storage, magic-byte and size checks, filename sanitisation, preview, ELA |
+| `test_dashboard.py` | Dashboard metrics and model registry |
+| `test_config.py`, `test_http.py`, `test_execution_surface.py` | Settings validation; security headers, CORS and error handling; model pinning and AI availability |
+| `test_migrations.py`, `test_repo_hygiene.py` | Alembic migrations, ignored/tracked files and dependencies |
+| `test_master_verification_suite.py` | Cross-cutting acceptance checks (no public registration, IDOR, audit chain, storage, ML/RAG, authority hub) |
 
 ---
 
 ## 6. How to Run Locally
 
 ### Prerequisites
-- Python 3.11 with [uv](https://docs.astral.sh/uv/), and Node.js 20+.
+- Python 3.14 with [uv](https://docs.astral.sh/uv/), and Node.js 20+.
 - (Optional) Local Ollama on `http://localhost:11434` for AI review. When Ollama is down, `POST /api/applications/{id}/agent-review` returns `503`.
 - (Optional) The `ai` extra for the CrewAI / LangGraph / ChromaDB features: `uv sync --extra ai`.
 
@@ -231,7 +233,7 @@ Create the schema and the first administrator (the password is prompted, 12-128 
 uv run python -m alembic upgrade head
 uv run python -m app.cli create-admin --email admin@example.org --full-name "Site Admin"
 ```
-A local `aicte_platform.db` created before the Alembic migrations must be deleted and recreated, or stamped with `uv run python -m alembic stamp 0001` and then upgraded.
+A local `backend/aicte_platform.db` created before the Alembic migrations (by an older version of this project) must be **deleted** and then recreated with the two commands above (`alembic upgrade head`, then `create-admin`). Do not try to adopt it into the migrations: it still holds the old seeded demo accounts and passwords.
 
 ### 2. Run the API and the frontend
 ```bash
@@ -240,10 +242,35 @@ npm install && npm run dev                                          # frontend/,
 ```
 The Vite dev server proxies `/fastapi-proxy` to `http://localhost:8000` (override with `TRACE_API_ORIGIN`). Sign in as the admin and use **Users** to create reviewer and applicant accounts; new users must change their temporary password at first sign-in. There are no built-in demo accounts.
 
-### 3. Production notes
-See [`frontend/README.md`](frontend/README.md) section 4 (same-origin reverse proxy, cookie path, forwarded IPs).
+### 3. Onboard an institution
+An applicant account must be linked to an institution, and institutions are created by an admin through the API. Sign in to obtain an access token, then `POST /api/institutions` with the `InstitutionCreate` fields:
+```bash
+TOKEN=$(curl -s -X POST http://127.0.0.1:8000/api/auth/login \
+  -d "username=admin@example.org" --data-urlencode "password=<admin password>" \
+  | python -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
 
-### 4. Tests
+curl -s -X POST http://127.0.0.1:8000/api/institutions \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{
+        "aicte_permanent_id": "1-1234567890",
+        "name": "Example Institute of Technology",
+        "state": "Maharashtra",
+        "district": "Pune",
+        "address": "1 College Road, Pune 411001",
+        "established_year": 2010,
+        "historical_records": {}
+      }'
+```
+`aicte_permanent_id` must be unique (`400` otherwise); `historical_records` is optional (previous EoA reference, approved intake, etc.). The response carries the institution `id`. Then create the institution's applicant accounts with that institution: in **Users**, or `POST /api/admin/users` with `"role": "applicant", "institution_id": <id>`. `GET /api/institutions` lists existing institutions.
+
+### 4. Production notes
+See [`frontend/README.md`](frontend/README.md) section 4 (same-origin reverse proxy, cookie path, forwarded IPs). Before going live also check:
+- **Request body limit:** set the reverse proxy's upload limit (e.g. nginx `client_max_body_size`) to about `MAX_UPLOAD_MB` (default 25 MB) so oversized uploads are refused at the edge.
+- **Back up `FILE_ENCRYPTION_KEY` and `AUDIT_HMAC_KEY`** (secretly, alongside the database backups). Losing `FILE_ENCRYPTION_KEY` makes every stored document unreadable; losing or changing `AUDIT_HMAC_KEY` makes the audit chain unverifiable (`verify-chain` reports `BROKEN`).
+- **Content-Security-Policy for the SPA:** serve the built frontend with a CSP (e.g. `default-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'`, adding `frame-src`/`img-src` `blob:` if documents are previewed from blob URLs); the API's security headers do not cover the static files.
+- **Purge expired refresh tokens:** rows in `refresh_tokens` are kept after they expire or are revoked; delete expired rows periodically (e.g. a daily `DELETE FROM refresh_tokens WHERE expires_at < CURRENT_TIMESTAMP`).
+
+### 5. Tests
 ```bash
 cd backend && uv run python -m pytest -q
 cd frontend && npm test && npm run lint && npm run build

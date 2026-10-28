@@ -4,7 +4,7 @@ import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlmodel import Session
+from sqlmodel import Session, func, select
 
 from app.database import get_session
 from app.models.enums import UserRole
@@ -48,6 +48,13 @@ def validate_password_policy(password: str, email: str) -> None:
     email = email.lower()
     if lowered == email or lowered == email.split("@", 1)[0]:
         raise ValueError("Password must not match the email address")
+
+
+def find_user_by_email(session: Session, email: str) -> Optional[User]:
+    """Case-insensitive, whitespace-trimmed lookup (also matches pre-normalisation mixed-case rows)."""
+    return session.exec(
+        select(User).where(func.lower(User.email) == email.strip().lower()).order_by(User.id)
+    ).first()
 
 
 def _credentials_exception() -> HTTPException:

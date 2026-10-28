@@ -34,7 +34,7 @@ def admin_headers(client, admin):
 
 def payload(**over):
     body = {
-        "email": "new.user@example.test",
+        "email": "new.user@example.org",
         "full_name": "New User",
         "role": "reviewer",
         "temporary_password": TEMP,
@@ -54,7 +54,7 @@ def test_admin_creates_applicant_with_institution(client, session, admin_headers
     assert body["must_change_password"] is True
     assert body["institution_id"] == institution_id
     assert "hashed_password" not in body and "temporary_password" not in body
-    user = session.exec(select(User).where(User.email == "new.user@example.test")).one()
+    user = session.exec(select(User).where(User.email == "new.user@example.org")).one()
     assert user.must_change_password is True
     audit = session.exec(select(AuditLog).where(AuditLog.action_type == "USER_CREATED")).one()
     assert TEMP not in str(audit.details) and TEMP not in audit.summary
@@ -227,11 +227,11 @@ def _passwords(monkeypatch, *values):
 
 
 def test_cli_create_admin(db_path, session, monkeypatch, capsys):
-    argv = ["create-admin", "--email", "root@example.test", "--full-name", "Root Admin"]
+    argv = ["create-admin", "--email", "root@example.org", "--full-name", "Root Admin"]
     _passwords(monkeypatch, "Strong-Password-12", "Strong-Password-12")
     assert cli.main(argv) == 0
     session.expire_all()
-    user = session.exec(select(User).where(User.email == "root@example.test")).one()
+    user = session.exec(select(User).where(User.email == "root@example.org")).one()
     assert user.role == UserRole.ADMIN
     assert user.must_change_password is False
     assert user.institution_id is None
@@ -242,10 +242,61 @@ def test_cli_create_admin(db_path, session, monkeypatch, capsys):
 
 
 def test_cli_create_admin_weak_or_mismatched_password(db_path, session, monkeypatch, capsys):
-    argv = ["create-admin", "--email", "weak@example.test", "--full-name", "Weak"]
+    argv = ["create-admin", "--email", "weak@example.org", "--full-name", "Weak"]
     _passwords(monkeypatch, "short", "short")
     assert cli.main(argv) != 0
     _passwords(monkeypatch, "Strong-Password-12", "Different-Password-1")
     assert cli.main(argv) != 0
-    assert session.exec(select(User).where(User.email == "weak@example.test")).first() is None
+    assert session.exec(select(User).where(User.email == "weak@example.org")).first() is None
     assert "Strong-Password-12" not in capsys.readouterr().out
+
+
+def test_emails_are_normalised_and_unique_case_insensitively(client, session, admin_headers):
+    r = client.post(
+        "/api/admin/users", json=payload(email="  Priya.Sharma@Example.org "), headers=admin_headers
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["email"] == "priya.sharma@example.org"
+
+    r = client.post("/api/auth/login", data={"username": "priya.sharma@example.org", "password": TEMP})
+    assert r.status_code == 200, r.text
+    r = client.post("/api/auth/login", data={"username": " PRIYA.Sharma@example.ORG", "password": TEMP})
+    assert r.status_code == 200, r.text
+
+    r = client.post(
+        "/api/admin/users", json=payload(email="priya.SHARMA@example.org"), headers=admin_headers
+    )
+    assert r.status_code == 409, r.text
+
+
+def test_admin_create_rejects_invalid_email(client, admin_headers):
+    r = client.post("/api/admin/users", json=payload(email="not-an-email"), headers=admin_headers)
+    assert r.status_code == 422, r.text
+
+
+def test_login_matches_existing_mixed_case_email(client, session):
+    make_user(session, "reviewer", email="Legacy.Mixed@Example.org")
+    r = client.post("/api/auth/login", data={"username": "legacy.mixed@example.org", "password": PW})
+    assert r.status_code == 200, r.text
+
+
+def test_admin_duplicate_check_matches_existing_mixed_case_email(client, session, admin_headers):
+    make_user(session, "reviewer", email="Legacy.Dup@Example.org")
+    r = client.post("/api/admin/users", json=payload(email="legacy.dup@example.org"), headers=admin_headers)
+    assert r.status_code == 409, r.text
+
+
+def test_cli_create_admin_normalises_and_validates_email(db_path, session, monkeypatch, capsys):
+    _passwords(monkeypatch, "Strong-Password-12", "Strong-Password-12")
+    assert cli.main(["create-admin", "--email", "not-an-email", "--full-name", "Bad"]) != 0
+    assert "email" in capsys.readouterr().err.lower()
+    assert session.exec(select(User).where(User.full_name == "Bad")).first() is None
+
+    _passwords(monkeypatch, "Strong-Password-12", "Strong-Password-12")
+    assert cli.main(["create-admin", "--email", " Root.Admin@Example.org ", "--full-name", "Root"]) == 0
+    session.expire_all()
+    assert session.exec(select(User).where(User.full_name == "Root")).one().email == "root.admin@example.org"
+
+    _passwords(monkeypatch, "Strong-Password-12", "Strong-Password-12")
+    assert cli.main(["create-admin", "--email", "ROOT.admin@example.org", "--full-name", "Root2"]) != 0
+    assert "exists" in capsys.readouterr().err
