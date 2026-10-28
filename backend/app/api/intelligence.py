@@ -152,8 +152,7 @@ def agent_review(
 ) -> Dict[str, Any]:
     """Run the grounded three-role AI review. Returns available=False if the local model is down."""
     from app.models.enums import UserRole
-    from app.models.models import Application
-    from app.services.agent_review_service import agent_review_service
+    from app.services.multi_agent_workflow import multi_agent_workflow_service
     from app.services.audit_service import log_audit_event
 
     app_obj = session.get(Application, application_id)
@@ -162,12 +161,15 @@ def agent_review(
     if current_user.role == UserRole.APPLICANT and app_obj.institution_id != current_user.institution_id:
         raise HTTPException(status_code=403, detail="Access denied: application belongs to another institution.")
 
-    result = agent_review_service.run(session, application_id)
-    if result.get("steps"):
-        log_audit_event(
-            session, application_id=application_id, action_type="AI_REVIEW_COMPLETED", entity_type="Application",
-            entity_id=app_obj.application_number, actor=current_user,
-            summary=f"AI advisory review ({result.get('model')}) generated for {app_obj.application_number}.",
-            details={"all_steps_ok": result.get("all_steps_ok"), "grounding": result.get("grounding")},
-        )
+    result = multi_agent_workflow_service.run_scrutiny_workflow(session, application_id)
+    log_audit_event(
+        session,
+        application_id=application_id,
+        action_type="LANGGRAPH_CREWAI_REVIEW_COMPLETED",
+        entity_type="Application",
+        entity_id=app_obj.application_number,
+        actor=current_user,
+        summary=f"LangGraph & CrewAI orchestrated review executed for {app_obj.application_number}.",
+        details={"status": result.get("status"), "grounding": result.get("grounding")},
+    )
     return result

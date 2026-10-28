@@ -129,18 +129,51 @@ export const AIAdvisoryPanel: React.FC<AIAdvisoryProps> = ({ applicationId }) =>
           padding: '12px',
           marginBottom: '14px',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--brand-navy)' }}>
-              Autonomous Review Output ({reviewResult.model || 'qwen2.5:1.5b-instruct'})
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--brand-navy)' }}>
+                LangGraph & CrewAI Multi-Agent Synthesis
+              </span>
+              <span className="mono" style={{ fontSize: '10px', backgroundColor: '#E2E8F0', padding: '1px 5px', borderRadius: '2px' }}>
+                Status: {reviewResult.status || 'COMPLETED'}
+              </span>
+            </div>
             <span style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
-              {new Date().toLocaleTimeString()}
+              Model: {reviewResult.model || 'qwen2.5:1.5b-instruct (Ollama)'}
             </span>
           </div>
 
-          <div style={{ fontSize: '13px', lineHeight: '1.5', whiteSpace: 'pre-line', color: 'var(--ink-primary)' }}>
-            {reviewResult.review_summary || reviewResult.report || JSON.stringify(reviewResult, null, 2)}
-          </div>
+          {/* Workflow Steps */}
+          {reviewResult.steps && reviewResult.steps.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+              {reviewResult.steps.map((st: any, idx: number) => (
+                <div key={idx} style={{ backgroundColor: '#FFFFFF', border: 'var(--border-subtle)', borderRadius: '2px', padding: '8px 10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '2px' }}>
+                    <span style={{ fontWeight: 600, fontSize: '12px', color: 'var(--brand-navy)' }}>
+                      Step {idx + 1}: {st.agent || st.role}
+                    </span>
+                    <span style={{ fontSize: '10px', color: 'var(--stat-verified-ink)', fontWeight: 600 }}>
+                      ✓ {st.role || 'Executed'}
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '12px', color: 'var(--ink-secondary)', lineHeight: '1.4' }}>
+                    {st.details || st.output || 'Analysis recorded.'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {reviewResult.advisory_synthesis && (
+            <div style={{ borderTop: 'var(--border-subtle)', paddingTop: '8px' }}>
+              <span style={{ fontWeight: 700, fontSize: '12px', color: 'var(--brand-navy)', display: 'block', marginBottom: '4px' }}>
+                Final Advisory Recommendation:
+              </span>
+              <p style={{ fontSize: '12px', color: 'var(--ink-primary)', lineHeight: '1.5' }}>
+                {reviewResult.advisory_synthesis}
+              </p>
+            </div>
+          )}
         </div>
       )}
 
