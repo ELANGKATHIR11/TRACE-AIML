@@ -5,20 +5,9 @@
  * "Not provided by API" when absent.
  */
 
-export enum PersonaRole {
-  OFFICIAL = 'OFFICIAL',
-  REVIEWER = 'REVIEWER',
-  APPLICANT = 'APPLICANT',
-}
+import type { Role } from '../lib/permissions/roles';
 
-export interface RequestedPersona {
-  id: 'official' | 'applicant';
-  label: string;
-  email: string;
-  role: PersonaRole;
-  institutionId?: number;
-  capabilitiesDescription: string;
-}
+export type { Role };
 
 export enum AuthorityIdentifier {
   STATE_BHULEKH = 'STATE_BHULEKH',
@@ -39,8 +28,8 @@ export enum AuthorityVerificationStatus {
 
 export enum OfficerDecisionType {
   APPROVE = 'APPROVE',
-  REQUEST_CORRECTION = 'REQUEST_CORRECTION',
-  ESCALATE = 'ESCALATE',
+  REQUEST_RECTIFICATION = 'REQUEST_RECTIFICATION',
+  REJECT = 'REJECT',
 }
 
 export enum DocumentCategory {
@@ -143,6 +132,9 @@ export interface DocumentRecord {
   content_type?: string | null;
   mime_type?: string | null;
   file_size?: number | null;
+  file_size_bytes?: number | null;
+  issuing_authority?: string | null;
+  verification_details?: Record<string, unknown> | null;
   page_count?: number | null;
   status?: string | null;
   verification_status?: string | null;
@@ -181,10 +173,17 @@ export interface ComplianceFlag {
   highlight_terms?: string[] | null;
   bounding_box?: BoundingBoxCoordinate | null;
   created_at?: string | null;
+  flag_category?: string | null;
+  reason?: string | null;
+  field_name?: string | null;
+  is_advisory?: boolean | null;
+  is_resolved?: boolean | null;
 }
 
 export interface AuthorityVerificationRecord {
-  authority_id: string;
+  authority_id?: string;
+  document_id?: string | number | null;
+  document_type?: string | null;
   authority_name?: string | null;
   status: AuthorityVerificationStatus | string;
   verified_at?: string | null;
@@ -192,7 +191,7 @@ export interface AuthorityVerificationRecord {
   reference_id?: string | null;
   provenance?: string | null;
   source_endpoint?: string | null;
-  details?: string | null;
+  details?: string | Record<string, unknown> | null;
   message?: string | null;
   discrepancy_summary?: string | null;
 }
@@ -218,15 +217,18 @@ export interface ApplicationRecord {
   submitted_at?: string | null;
   deficiencies_count?: number | null;
   flags_count?: number | null;
+  declared_data?: Record<string, unknown> | null;
 }
 
 export interface DecisionHistoryItem {
   id?: string | number;
   decision: OfficerDecisionType | string;
   officer_email?: string | null;
-  officer_id?: string | null;
+  officer_id?: string | number | null;
   officer_notes?: string | null;
   notes?: string | null;
+  decided_at?: string | null;
+  audit_hash?: string | null;
   created_at?: string | null;
   timestamp?: string | null;
 }
@@ -244,15 +246,17 @@ export interface ApplicationDetailRecord extends ApplicationRecord {
   agent_review?: AgentReviewResponse | null;
 }
 
+export interface DeclaredData {
+  land_area_acres?: number;
+  built_up_area_sqm?: number;
+  total_intake?: number;
+  faculty_count?: number;
+}
+
 export interface ApplicationCreateRequest {
   category: string;
   academic_year: string;
-  declared_land_area: number;
-  built_up_area: number;
-  total_intake: number;
-  faculty_count: number;
-  institution_id?: number;
-  institution_name?: string;
+  declared_data: DeclaredData;
 }
 
 export interface AgentStageOutput {
@@ -289,8 +293,7 @@ export interface AgentReviewResponse {
 
 export interface DecisionRequest {
   decision: OfficerDecisionType;
-  officer_notes?: string;
-  notes?: string;
+  notes: string;
 }
 
 export interface DecisionResponse {
@@ -299,7 +302,7 @@ export interface DecisionResponse {
   decision: string;
   status?: string;
   officer_notes?: string | null;
-  officer_id?: string | null;
+  officer_id?: string | number | null;
   decided_at?: string | null;
   timestamp?: string | null;
   message?: string | null;
@@ -308,13 +311,7 @@ export interface DecisionResponse {
 
 export interface RectificationSubmitRequest {
   notes?: string;
-  justification?: string;
-  amended_parameters?: {
-    declared_land_area?: number;
-    built_up_area?: number;
-    total_intake?: number;
-    faculty_count?: number;
-  };
+  amended?: DeclaredData;
 }
 
 export interface RectificationSubmitResponse {
@@ -342,6 +339,8 @@ export interface AuditLogEntry {
   current_hash?: string | null;
   hash?: string | null;
   merkle_root?: string | null;
+  action_type?: string;
+  record_hash?: string | null;
 }
 
 export interface ChainVerificationResponse {
@@ -383,16 +382,54 @@ export interface ElaAnalysisResponse {
   max_difference?: number | null;
   mean_error_level?: number | null;
   anomaly_score?: number | null;
+  tampering_detected?: boolean | null;
+  details?: string | null;
   tamper_regions?: BoundingBoxCoordinate[] | null;
   metadata?: Record<string, unknown> | null;
 }
 
-export interface OpenAPISpec {
-  openapi?: string;
-  info?: {
-    title?: string;
-    version?: string;
-    description?: string;
-  };
-  paths?: Record<string, Record<string, unknown>>;
+export interface User {
+  id: number;
+  email: string;
+  full_name: string;
+  role: Role;
+  institution_id: number | null;
+  is_active: boolean;
+  must_change_password: boolean;
+  created_at: string;
+}
+
+export interface LoginResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  user: User;
+}
+
+export interface AdminUserCreate {
+  email: string;
+  full_name: string;
+  role: Role;
+  institution_id?: number | null;
+  temporary_password: string;
+}
+
+export interface AdminUserUpdate {
+  full_name?: string;
+  role?: Role;
+  institution_id?: number | null;
+  is_active?: boolean;
+  reset_password?: string;
+}
+
+export interface Institution {
+  id: number;
+  aicte_permanent_id: string;
+  name: string;
+  state: string;
+  district: string;
+  address: string;
+  established_year: number;
+  historical_records: Record<string, unknown>;
+  created_at: string;
 }
