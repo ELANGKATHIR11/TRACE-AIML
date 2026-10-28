@@ -1,15 +1,17 @@
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
+from sqlmodel import Session
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import applications, audit, auth, dashboard, documents, rules
 from app.config import settings
-from app.database import init_db_and_seed
+from app.database import get_engine, seed_reference_data
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db_and_seed()
+    with Session(get_engine()) as session:
+        seed_reference_data(session)
     yield
 
 
