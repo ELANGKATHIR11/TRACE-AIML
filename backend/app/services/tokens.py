@@ -114,7 +114,7 @@ def revoke_family(session: Session, family_id: str) -> None:
     session.commit()
 
 
-def revoke_all_for_user(session: Session, user_id: int) -> None:
+def revoke_all_for_user(session: Session, user_id: int, *, commit: bool = True) -> None:
     now = utc_now()
     rows = session.exec(
         select(RefreshToken).where(
@@ -124,7 +124,10 @@ def revoke_all_for_user(session: Session, user_id: int) -> None:
     for r in rows:
         r.revoked_at = now
         session.add(r)
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
 
 
 def _reuse_detected(session: Session, row: RefreshToken, user: Optional[User]) -> RefreshTokenError:

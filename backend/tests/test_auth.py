@@ -68,7 +68,17 @@ def test_lockout_after_five_failures(client, session):
     db_user = session.get(User, user.id)
     assert db_user.locked_until is not None
     actions = [a.action_type for a in session.exec(select(AuditLog)).all()]
-    assert "ACCOUNT_LOCKED" in actions
+    assert actions.count("ACCOUNT_LOCKED") == 1
+
+    # Attempts during an active lock neither extend it nor re-lock it.
+    locked_until = db_user.locked_until
+    assert _login(client, user.email, "Wrong-Password-1").status_code == 401
+    assert _login(client, user.email).status_code == 401
+    session.expire_all()
+    db_user = session.get(User, user.id)
+    assert db_user.locked_until == locked_until
+    actions = [a.action_type for a in session.exec(select(AuditLog)).all()]
+    assert actions.count("ACCOUNT_LOCKED") == 1
 
     db_user.locked_until = utc_now() - timedelta(minutes=1)
     session.add(db_user)
@@ -81,6 +91,71 @@ def test_lockout_after_five_failures(client, session):
     db_user = session.get(User, user.id)
     assert db_user.failed_login_count == 0
     assert db_user.locked_until is None
+
+
+def test_correct_password_after_four_failures_succeeds(client, session):
+    user = make_user(session, "reviewer")
+    for _ in range(4):
+        assert _login(client, user.email, "Wrong-Password-1").status_code == 401
+    assert _login(client, user.email).status_code == 200
+    session.expire_all()
+    assert session.get(User, user.id).failed_login_count == 0
+
+
+def test_lock_during_password_check_rejects_login(client, session, monkeypatch):
+    """A lock that lands while bcrypt runs must win over a correct password."""
+    from sqlmodel import Session
+
+    from app.api import auth as auth_api
+    from app.database import get_engine
+    from app.models.models import RefreshToken
+
+    user = make_user(session, "reviewer")
+    real_verify = auth_api.verify_password
+
+    def verify_then_lock(plain, hashed):
+        ok = real_verify(plain, hashed)
+        if ok and plain == PASSWORD:
+            with Session(get_engine()) as other:
+                u = other.get(User, user.id)
+                u.locked_until = utc_now() + timedelta(minutes=15)
+                other.add(u)
+                other.commit()
+        return ok
+
+    monkeypatch.setattr(auth_api, "verify_password", verify_then_lock)
+    resp = _login(client, user.email)
+    assert resp.status_code == 401
+    assert resp.json() == GENERIC_401
+    assert "set-cookie" not in resp.headers
+    assert session.exec(select(RefreshToken).where(RefreshToken.user_id == user.id)).first() is None
+    actions = [a.action_type for a in session.exec(select(AuditLog)).all()]
+    assert "LOGIN_SUCCEEDED" not in actions
+
+
+def test_exhausted_attempt_budget_never_checks_password(client, session, monkeypatch):
+    """With the failure budget used up (e.g. concurrent attempts in flight), no more guesses."""
+    from app.api import auth as auth_api
+
+    user = make_user(session, "reviewer")
+    user.failed_login_count = 5
+    session.add(user)
+    session.commit()
+
+    checked = []
+    real_verify = auth_api.verify_password
+
+    def spy(plain, hashed):
+        checked.append(hashed)
+        return real_verify(plain, hashed)
+
+    monkeypatch.setattr(auth_api, "verify_password", spy)
+    resp = _login(client, user.email)
+    assert resp.status_code == 401
+    session.expire_all()
+    db_user = session.get(User, user.id)
+    assert db_user.hashed_password not in checked
+    assert db_user.locked_until is not None  # stuck budget turns into a time-limited lock
 
 
 def test_ip_rate_limit(client):

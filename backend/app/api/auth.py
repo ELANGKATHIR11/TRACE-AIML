@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import and_, not_
 from sqlalchemy import update as sa_update
 from sqlmodel import Session, select
 
@@ -101,6 +102,77 @@ def _issue_session(
     )
 
 
+def _locked_now(now: datetime):
+    return and_(User.locked_until.is_not(None), User.locked_until > now)
+
+
+def _reserve_login_attempt(session: Session, user_id: int) -> bool:
+    """Atomically count this attempt before the password is checked.
+
+    At most LOCKOUT_THRESHOLD attempts can be reserved per failure window, so concurrent
+    requests cannot get extra password guesses past the lockout. An expired lock starts a
+    fresh window. Returns False if the account is locked or its budget is exhausted.
+    """
+    now = utc_now()
+    session.execute(
+        sa_update(User)
+        .where(User.id == user_id, User.locked_until.is_not(None), User.locked_until <= now)
+        .values(failed_login_count=0, locked_until=None)
+    )
+    reserved = session.execute(
+        sa_update(User)
+        .where(
+            User.id == user_id,
+            not_(_locked_now(now)),
+            User.failed_login_count < LOCKOUT_THRESHOLD,
+        )
+        .values(failed_login_count=User.failed_login_count + 1)
+    )
+    session.commit()
+    return reserved.rowcount == 1
+
+
+def _lock_if_exhausted(session: Session, user: User, ip: str) -> None:
+    """Lock the account once its failure count reaches the threshold (never extends a lock)."""
+    now = utc_now()
+    locked = session.execute(
+        sa_update(User)
+        .where(
+            User.id == user.id,
+            User.failed_login_count >= LOCKOUT_THRESHOLD,
+            not_(_locked_now(now)),
+        )
+        .values(locked_until=now + LOCKOUT_DURATION)
+    )
+    session.commit()
+    session.refresh(user)
+    if locked.rowcount == 1:
+        log_audit_event(
+            session,
+            action_type="ACCOUNT_LOCKED",
+            entity_type="User",
+            entity_id=str(user.id),
+            actor_role_override="SYSTEM",
+            summary=f"Account locked after {user.failed_login_count} failed sign-in attempts",
+            details={
+                "failed_login_count": user.failed_login_count,
+                "locked_until": as_utc(user.locked_until).isoformat(),
+                "ip": ip,
+            },
+        )
+
+
+def _claim_login_success(session: Session, user_id: int) -> bool:
+    """Reset failure state unless the account got locked meanwhile; False means reject."""
+    claimed = session.execute(
+        sa_update(User)
+        .where(User.id == user_id, not_(_locked_now(utc_now())))
+        .values(failed_login_count=0, locked_until=None)
+    )
+    session.commit()
+    return claimed.rowcount == 1
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(
     request: Request,
@@ -122,45 +194,16 @@ def login(
         _audit_login_failed(session, None, "unknown_account", ip)
         raise _login_failed()
 
-    now = utc_now()
-    if user.locked_until is not None and as_utc(user.locked_until) <= now:
-        # Lock expired: start a fresh failure window.
-        user.locked_until = None
-        user.failed_login_count = 0
-        session.add(user)
-        session.commit()
-
-    password_ok = verify_password(form_data.password, user.hashed_password)
-
-    if user.locked_until is not None:
+    user_id = user.id
+    if not _reserve_login_attempt(session, user_id):
+        # Locked (or attempt budget exhausted): keep timing comparable, never check the password.
+        verify_password(form_data.password, _DUMMY_PASSWORD_HASH)
+        _lock_if_exhausted(session, user, ip)
         _audit_login_failed(session, user, "account_locked", ip)
         raise _login_failed()
 
-    if not password_ok:
-        session.execute(
-            sa_update(User)
-            .where(User.id == user.id)
-            .values(failed_login_count=User.failed_login_count + 1)
-        )
-        session.commit()
-        session.refresh(user)
-        if user.failed_login_count >= LOCKOUT_THRESHOLD:
-            user.locked_until = now + LOCKOUT_DURATION
-            session.add(user)
-            session.commit()
-            log_audit_event(
-                session,
-                action_type="ACCOUNT_LOCKED",
-                entity_type="User",
-                entity_id=str(user.id),
-                actor_role_override="SYSTEM",
-                summary=f"Account locked after {user.failed_login_count} failed sign-in attempts",
-                details={
-                    "failed_login_count": user.failed_login_count,
-                    "locked_until": as_utc(user.locked_until).isoformat(),
-                    "ip": ip,
-                },
-            )
+    if not verify_password(form_data.password, user.hashed_password):
+        _lock_if_exhausted(session, user, ip)
         _audit_login_failed(session, user, "bad_password", ip)
         raise _login_failed()
 
@@ -168,11 +211,10 @@ def login(
         _audit_login_failed(session, user, "inactive", ip)
         raise _login_failed()
 
-    user.failed_login_count = 0
-    user.locked_until = None
-    session.add(user)
-    session.commit()
-    session.refresh(user)
+    if not _claim_login_success(session, user_id):
+        # Account was locked while this attempt's password was being checked.
+        _audit_login_failed(session, user, "account_locked", ip)
+        raise _login_failed()
 
     raw_refresh, refresh_row = tokens.issue_refresh_token(session, user)
     log_audit_event(
@@ -265,8 +307,9 @@ def change_password(
     current_user.token_version += 1
     current_user.must_change_password = False
     session.add(current_user)
+    # One transaction: the new password never becomes valid while old refresh families survive.
+    tokens.revoke_all_for_user(session, current_user.id, commit=False)
     session.commit()
-    tokens.revoke_all_for_user(session, current_user.id)
     session.refresh(current_user)
 
     log_audit_event(
