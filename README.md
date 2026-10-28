@@ -1,13 +1,11 @@
 # AICTE TRACE: Autonomous Regulatory Compliance & Forensic Document Authentication Platform
 ### Smart India Hackathon 2026 | Problem Statement ID: 26261 | Organization: AICTE (Regulation Bureau)
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python: 3.11](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green.svg)](https://fastapi.tiangolo.com/)
 [![Local LLM: Ollama](https://img.shields.io/badge/Ollama-qwen2.5%3A1.5b--instruct-orange.svg)](https://ollama.com/)
 [![Security: AES-256-GCM](https://img.shields.io/badge/Security-AES--256--GCM-red.svg)]()
 [![Vector DB: ChromaDB](https://img.shields.io/badge/Vector%20Store-ChromaDB%20VRAG%2FMRAG-blueviolet.svg)]()
-[![Build & Test](https://img.shields.io/badge/Tests-12%2F12%20Passing-brightgreen.svg)]()
 
 ---
 
