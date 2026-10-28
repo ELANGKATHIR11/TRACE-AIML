@@ -134,6 +134,7 @@ def offline_services(monkeypatch):
         monkeypatch,
         "app.services.multi_agent_workflow",
         "multi_agent_workflow_service",
+        is_available=lambda: True,
         run_scrutiny_workflow=lambda *a, **k: {"status": "STUB"},
     )
     _fake_module(

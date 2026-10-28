@@ -1,11 +1,11 @@
 """Integrated CrewAI Multi-Agent & LangGraph StateGraph Orchestration Engine for TRACE.
 
 Combines:
-1. CrewAI (f:/TRACE/crewAI-main):
+1. CrewAI:
    - Agent: Autonomous roles (Forensic Auditor, Regulatory Compliance Officer, Evidence Compiler)
    - Task: Goal-oriented regulatory scrutiny tasks with expected outputs
    - Crew: Hierarchical / sequential team deliberation
-2. LangGraph StateGraph (f:/TRACE/langgraph-main):
+2. LangGraph StateGraph:
    - Directed acyclic state graph routing data, state checkpoints, and human-in-the-loop gates
 3. Local Sovereign AI:
    - ChromaDB Vector RAG (Approval Process Handbook)
@@ -13,30 +13,9 @@ Combines:
 """
 
 import logging
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
 from sqlmodel import Session, select
-
-# Link local sovereign LangGraph repository (f:/TRACE/langgraph-main)
-LANGGRAPH_CORE_LIBS = [
-    Path("f:/TRACE/langgraph-main/libs/checkpoint"),
-    Path("f:/TRACE/langgraph-main/libs/langgraph"),
-    Path("f:/TRACE/langgraph-main/libs/prebuilt"),
-]
-for lib_path in LANGGRAPH_CORE_LIBS:
-    if lib_path.exists() and str(lib_path) not in sys.path:
-        sys.path.insert(0, str(lib_path))
-
-# Link local sovereign CrewAI repository (f:/TRACE/crewAI-main)
-CREWAI_CORE_LIBS = [
-    Path("f:/TRACE/crewAI-main/lib/crewai-core/src"),
-    Path("f:/TRACE/crewAI-main/lib/crewai/src"),
-    Path("f:/TRACE/crewAI-main/lib/crewai-tools/src"),
-]
-for lib_path in CREWAI_CORE_LIBS:
-    if lib_path.exists() and str(lib_path) not in sys.path:
-        sys.path.insert(0, str(lib_path))
 
 try:
     from langgraph.graph import StateGraph, END  # type: ignore
@@ -251,6 +230,10 @@ else:
 class MultiAgentWorkflowService:
     """Orchestrates CrewAI Multi-Agent Delegation within LangGraph State Machine."""
 
+    def is_available(self) -> bool:
+        """True when the local Ollama model server is reachable."""
+        return ollama_service.is_available()
+
     def run_scrutiny_workflow(self, db: Session, application_id: int) -> Dict[str, Any]:
         app_obj = db.get(Application, application_id)
         if not app_obj:
@@ -304,8 +287,8 @@ class MultiAgentWorkflowService:
             "application_id": application_id,
             "application_number": app_obj.application_number,
             "frameworks": [
-                "LangGraph StateGraph Engine (f:/TRACE/langgraph-main)",
-                "CrewAI Multi-Agent Architecture (f:/TRACE/crewAI-main)",
+                "LangGraph StateGraph Engine",
+                "CrewAI Multi-Agent Architecture",
                 "ChromaDB Vector RAG",
                 "Ollama Qwen 2.5 LLM",
             ],

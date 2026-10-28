@@ -52,14 +52,20 @@ def model_metrics(current_user: User = Depends(require_staff)) -> Dict[str, Any]
 
 @router.post("/models/predict-document")
 def predict_document(payload: ClassifyRequest, current_user: User = Depends(require_staff)):
-    from app.services.ml_training_platform import ml_training_platform
-    return ml_training_platform.predict_document_type(payload.text)
+    from app.services.ml_training_platform import ModelUnavailable, ml_training_platform
+    try:
+        return ml_training_platform.predict_document_type(payload.text)
+    except ModelUnavailable:
+        raise HTTPException(status_code=503, detail="Model unavailable")
 
 
 @router.post("/models/predict-forgery")
 def predict_forgery(payload: ForgeryFeatures, current_user: User = Depends(require_staff)):
-    from app.services.ml_training_platform import ml_training_platform
-    return ml_training_platform.predict_forgery_risk(payload.model_dump())
+    from app.services.ml_training_platform import ModelUnavailable, ml_training_platform
+    try:
+        return ml_training_platform.predict_forgery_risk(payload.model_dump())
+    except ModelUnavailable:
+        raise HTTPException(status_code=503, detail="Model unavailable")
 
 
 # ---------------------------------------------------------------------- RAG
@@ -149,11 +155,14 @@ def agent_review(
     session=Depends(get_session),
     current_user: User = Depends(require_staff),
 ) -> Dict[str, Any]:
-    """Run the grounded three-role AI review. Returns available=False if the local model is down."""
+    """Run the grounded three-role AI review. 503 if the local model server is down."""
     from app.services.multi_agent_workflow import multi_agent_workflow_service
     from app.services.audit_service import log_audit_event
 
     app_obj = load_application(session, application_id, current_user)
+
+    if not multi_agent_workflow_service.is_available():
+        raise HTTPException(status_code=503, detail="AI review unavailable")
 
     result = multi_agent_workflow_service.run_scrutiny_workflow(session, application_id)
     log_audit_event(
