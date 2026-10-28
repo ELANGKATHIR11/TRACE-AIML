@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.enums import (
     ApplicationCategory,
@@ -36,6 +36,27 @@ class ChangePasswordRequest(BaseModel):
     current_password: str = Field(min_length=1, max_length=1024)
     # Policy (length, not equal to email) is enforced by security.validate_password_policy.
     new_password: str = Field(max_length=1024)
+
+
+class AdminUserCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: str = Field(min_length=3, max_length=254)
+    full_name: str = Field(min_length=1, max_length=200)
+    role: UserRole
+    institution_id: Optional[int] = None
+    # Policy (length, not equal to email) is enforced by security.validate_password_policy.
+    temporary_password: str = Field(max_length=1024)
+
+
+class AdminUserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    role: Optional[UserRole] = None
+    institution_id: Optional[int] = None
+    is_active: Optional[bool] = None
+    reset_password: Optional[str] = Field(default=None, max_length=1024)
 
 
 # --- Institution Schemas ---

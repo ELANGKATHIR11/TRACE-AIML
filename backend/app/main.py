@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from sqlmodel import Session
 
-from app.api import applications, audit, auth, dashboard, documents, health, rules
+from app.api import admin, applications, audit, auth, dashboard, documents, health, rules
 from app.config import settings
 from app.database import get_engine, seed_reference_data
 from app.http import install
@@ -36,6 +36,7 @@ app = FastAPI(
 install(app)
 
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(rules.router)
 app.include_router(applications.router)
 app.include_router(documents.router)
