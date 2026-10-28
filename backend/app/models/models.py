@@ -10,6 +10,7 @@ from app.models.enums import (
     DocumentType,
     FlagCategory,
     FlagSeverity,
+    OfficerDecisionType,
     UserRole,
     VerificationStatus,
 )
@@ -162,6 +163,9 @@ class Document(SQLModel, table=True):
     verification_details: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
     uploaded_at: datetime = Field(default_factory=utc_now)
+    # Set when a newer upload of the same type replaces this one; superseded rows are kept for
+    # the audit trail but excluded from listings, checklists and verification (spec §6.2).
+    superseded_by_id: Optional[int] = Field(default=None, foreign_key="documents.id")
 
     application: Optional[Application] = Relationship(back_populates="documents")
     flags: List["ValidationFlag"] = Relationship(back_populates="document")
@@ -198,6 +202,21 @@ class ValidationFlag(SQLModel, table=True):
 
     application: Optional[Application] = Relationship(back_populates="flags")
     document: Optional[Document] = Relationship(back_populates="flags")
+
+
+class OfficerDecision(SQLModel, table=True):
+    """A reviewer's recorded determination on an application (spec §6.3)."""
+    __tablename__ = "officer_decisions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    application_id: int = Field(foreign_key="applications.id", index=True)
+    officer_user_id: int = Field(foreign_key="users.id")
+    decision: OfficerDecisionType
+    notes: str
+    # NULL only transiently: the row is flushed together with the status change, before the
+    # audit entry that commits both, and is then linked to that entry.
+    audit_log_id: Optional[int] = Field(default=None, foreign_key="audit_logs.id")
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class AuditLog(SQLModel, table=True):

@@ -30,12 +30,14 @@ def apply_security_headers(response, path: str) -> None:
 class StatusConflict(HTTPException):
     """409 for an action not allowed in the resource's current status.
 
-    Rendered as `{"detail": ..., "current_status": ...}` by `status_conflict_handler`.
+    Rendered as `{"detail": ..., "current_status": ..., **extra}` by `status_conflict_handler`
+    (e.g. `missing_document_types` on submit).
     """
 
-    def __init__(self, detail: str, current_status: str):
+    def __init__(self, detail: str, current_status: str, **extra):
         super().__init__(status_code=409, detail=detail)
         self.current_status = current_status
+        self.extra = extra
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -82,7 +84,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def status_conflict_handler(request: Request, exc: StatusConflict) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
-        content={"detail": exc.detail, "current_status": exc.current_status},
+        content={**exc.extra, "detail": exc.detail, "current_status": exc.current_status},
     )
 
 

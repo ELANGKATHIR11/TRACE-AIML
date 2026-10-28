@@ -68,7 +68,13 @@ MATRIX = [
     ("GET", "/api/applications/{app}/flags", EVERYONE, {}),
     ("POST", "/api/applications/{app}/validate", STAFF_ONLY, {}),
     ("POST", "/api/applications/{app}/agent-review", STAFF_ONLY, {}),
-    ("POST", "/api/applications/{app}/decision", REVIEWER_ONLY, {"json": {"decision": "APPROVE"}}),
+    ("POST", "/api/applications/{app}/submit", APPLICANT_ONLY, {}),
+    (
+        "POST",
+        "/api/applications/{app}/decision",
+        REVIEWER_ONLY,
+        {"json": {"decision": "APPROVE", "notes": "Matrix decision notes"}},
+    ),
     (
         "POST",
         "/api/documents/upload",

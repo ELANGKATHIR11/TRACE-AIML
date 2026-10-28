@@ -7,15 +7,15 @@ Combines:
 100% Offline, no external APIs.
 """
 
-import hashlib
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from sqlmodel import Session, select
 
 from app.models.enums import ApplicationStatus, FlagCategory, FlagSeverity, VerificationStatus
 from app.models.models import Application, ChecklistRule, Document, ValidationFlag
+from app.services import workflow
 from app.services.audit_service import log_audit_event
 from app.services.document_storage import ela_on_bytes, read_document_plaintext
 from app.services.AI_service import gemini_service
@@ -154,8 +154,10 @@ class VerificationService:
         application = db.get(Application, application_id)
         if not application:
             raise ValueError(f"Application {application_id} not found")
+        # Fail before the (slow) OCR/extraction work; the transition below re-checks.
+        workflow.ensure_status(application, workflow.REVIEWABLE, "validate")
 
-        documents = db.exec(select(Document).where(Document.application_id == application_id)).all()
+        documents = workflow.current_documents(db, application_id)
         active_rules = db.exec(select(ChecklistRule).where(ChecklistRule.is_active == True)).all()
 
         # Step A: Ensure all uploaded documents have been parsed
@@ -164,7 +166,7 @@ class VerificationService:
                 self.process_document(db, doc)
 
         # Refresh documents after individual processing
-        documents = db.exec(select(Document).where(Document.application_id == application_id)).all()
+        documents = workflow.current_documents(db, application_id)
 
         # Step B: Run Multi-Document Regulatory Compliance
         compliance = rules_engine.evaluate_application_compliance(application, documents, active_rules)
@@ -185,14 +187,11 @@ class VerificationService:
 
         # Update application validation summary and state
         application.validation_summary = compliance
-        if compliance["overall_status"] == "FULLY_COMPLIANT":
-            application.status = ApplicationStatus.READY_FOR_REVIEW
-        elif compliance["overall_status"] == "NON_COMPLIANT_CRITICAL_DEFICITS":
-            application.status = ApplicationStatus.DEFICIENCY_FLAGGED
+        if compliance["overall_status"] == "NON_COMPLIANT_CRITICAL_DEFICITS":
+            target = ApplicationStatus.DEFICIENCY_FLAGGED
         else:
-            application.status = ApplicationStatus.READY_FOR_REVIEW
-
-        db.add(application)
+            target = ApplicationStatus.READY_FOR_REVIEW
+        workflow.transition(db, application, target, allowed_from=workflow.REVIEWABLE)
         db.commit()
         db.refresh(application)
 

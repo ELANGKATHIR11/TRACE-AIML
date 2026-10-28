@@ -8,6 +8,7 @@ from app.models.enums import (
     DocumentType,
     FlagCategory,
     FlagSeverity,
+    OfficerDecisionType,
     UserRole,
     VerificationStatus,
 )
@@ -108,16 +109,23 @@ class ChecklistRuleUpdate(BaseModel):
 
 
 # --- Application Schemas ---
+class DeclaredData(BaseModel):
+    """Figures the applicant declares on the application form (spec §6.2)."""
+    model_config = ConfigDict(extra="forbid")
+
+    land_area_acres: Optional[float] = Field(default=None, ge=0, le=1000)
+    built_up_area_sqm: Optional[float] = Field(default=None, ge=0, le=1_000_000)
+    total_intake: Optional[int] = Field(default=None, ge=0, le=10_000)
+    faculty_count: Optional[int] = Field(default=None, ge=0, le=5_000)
+
+
 class ApplicationCreate(BaseModel):
     # institution_id is taken from the authenticated applicant, never from the body (spec §4.3).
     model_config = ConfigDict(extra="forbid")
 
     academic_year: str = "2026-27"
     category: ApplicationCategory = ApplicationCategory.EOA
-    declared_data: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Applicant-submitted metadata (e.g., requested_intake, built_up_area_sqm, courses).",
-    )
+    declared_data: DeclaredData = Field(default_factory=DeclaredData)
 
 
 class ChecklistItemStatus(BaseModel):
@@ -129,6 +137,27 @@ class ChecklistItemStatus(BaseModel):
     uploaded: bool
     document_id: Optional[int] = None
     verification_status: Optional[VerificationStatus] = None
+
+
+class OfficerDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: OfficerDecisionType
+    notes: str = Field(min_length=10, max_length=4000)
+
+
+class DecisionRead(BaseModel):
+    id: int
+    application_id: int
+    decision: OfficerDecisionType
+    notes: str
+    officer_id: int
+    decided_at: datetime
+    audit_hash: Optional[str] = None
+
+
+class OfficerDecisionResponse(DecisionRead):
+    status: ApplicationStatus
 
 
 class ApplicationDetailResponse(BaseModel):
@@ -144,6 +173,10 @@ class ApplicationDetailResponse(BaseModel):
     updated_at: datetime
     applicable_checklist: List[ChecklistItemStatus]
     historical_aicte_records: Dict[str, Any]
+    institution_name: str
+    documents: List["DocumentRead"]
+    decisions: List[DecisionRead]
+    latest_decision: Optional[DecisionRead] = None
 
 
 # --- Document & Flag Schemas ---
@@ -196,3 +229,5 @@ class ValidationFlagRead(BaseModel):
     reviewer_notes: Optional[str] = None
     created_at: datetime
 
+
+ApplicationDetailResponse.model_rebuild()

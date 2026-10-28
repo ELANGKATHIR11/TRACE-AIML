@@ -168,6 +168,7 @@ def seed_golden_dossiers(session: Session) -> Dict[str, Any]:
         institution_id=inst.id,
         submitted_by_user_id=applicant.id,
         academic_year="2026-27",
+        status=ApplicationStatus.SUBMITTED,
         category=ApplicationCategory.EOA,
         declared_data={
             "dossier_title": "Golden Dossier A: 100% Compliant EoA Renewal",
@@ -261,6 +262,7 @@ def seed_golden_dossiers(session: Session) -> Dict[str, Any]:
         institution_id=inst.id,
         submitted_by_user_id=applicant.id,
         academic_year="2026-27",
+        status=ApplicationStatus.SUBMITTED,
         category=ApplicationCategory.NEW_INSTITUTION,
         declared_data={
             "dossier_title": "Golden Dossier B: Tampered Land Deed & State Bhulekh Discrepancy",
@@ -302,6 +304,7 @@ def seed_golden_dossiers(session: Session) -> Dict[str, Any]:
         institution_id=inst.id,
         submitted_by_user_id=applicant.id,
         academic_year="2026-27",
+        status=ApplicationStatus.SUBMITTED,
         category=ApplicationCategory.INTAKE_INCREASE,
         declared_data={
             "dossier_title": "Golden Dossier C: Ghost Faculty PAN Duplication & SFR 1:30 Deficit",
@@ -356,6 +359,7 @@ def seed_golden_dossiers(session: Session) -> Dict[str, Any]:
         institution_id=inst.id,
         submitted_by_user_id=applicant.id,
         academic_year="2026-27",
+        status=ApplicationStatus.SUBMITTED,
         category=ApplicationCategory.EOA,
         declared_data={
             "dossier_title": "Golden Dossier D: Expired Fire Safety NOC (Rectification Workflow Demo)",

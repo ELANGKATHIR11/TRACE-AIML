@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models.enums import DocumentType, VerificationStatus
 from app.models.models import Document, User
 from app.schemas.schemas import DocumentRead, DocumentUploadResponse
+from app.services import workflow
 from app.services.access import load_application, load_document, require_applicant, require_staff
 from app.services.audit_service import log_audit_event
 from app.services.document_storage import (
@@ -175,10 +176,9 @@ def list_application_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all documents attached to an application."""
+    """List the application's current (not superseded) documents."""
     load_application(db, application_id, current_user)
-    docs = db.exec(select(Document).where(Document.application_id == application_id)).all()
-    return docs
+    return workflow.current_documents(db, application_id)
 
 
 @router.get("/{document_id}/preview")
