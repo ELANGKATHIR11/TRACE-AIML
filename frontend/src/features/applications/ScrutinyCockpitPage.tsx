@@ -31,7 +31,7 @@ import {
   OfficerDecisionFormSchema,
   OfficerDecisionFormValues,
 } from '../../lib/schemas/apiSchemas';
-import { canDecide } from '../../lib/permissions/roles';
+import { canDecide, canValidate } from '../../lib/permissions/roles';
 import { ApiClientError } from '../../lib/api/transport';
 import {
   formatApiTimestamp,
@@ -59,6 +59,7 @@ export function ScrutinyCockpitPage() {
   const applicationId = id ?? '';
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const mayValidate = user !== null && canValidate(user.role);
   const mayDecide = user !== null && canDecide(user.role);
 
   const [selectedDocId, setSelectedDocId] = useState<string | number | null>(null);
@@ -242,7 +243,7 @@ export function ScrutinyCockpitPage() {
 
           <div className="flex items-center gap-2.5">
             {appDetail && <StatusIndicator value={appDetail.status} />}
-            {appDetail && VALIDATABLE_STATUSES.includes(appDetail.status ?? '') && (
+            {mayValidate && appDetail && VALIDATABLE_STATUSES.includes(appDetail.status ?? '') && (
               <button
                 type="button"
                 onClick={() => validateMutation.mutate()}

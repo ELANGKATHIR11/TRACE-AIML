@@ -81,6 +81,23 @@ describe('ScrutinyCockpitPage validation trigger', () => {
     await waitFor(() => expect(api.validateApplication).toHaveBeenCalledWith('5'));
   });
 
+  it('lets an admin run validation on a submitted dossier', async () => {
+    api.fetchApplicationDetail.mockResolvedValue({ id: 5, status: 'SUBMITTED', documents: [] } as never);
+    renderCockpit('admin');
+    expect(
+      await screen.findByRole('button', { name: /run statutory validation/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('does not offer validation to an applicant', async () => {
+    api.fetchApplicationDetail.mockResolvedValue({ id: 5, status: 'SUBMITTED', documents: [] } as never);
+    renderCockpit('applicant');
+    await screen.findByText(/dual-pane statutory scrutiny cockpit/i);
+    expect(
+      screen.queryByRole('button', { name: /run statutory validation/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it('does not offer validation once a decision has been recorded', async () => {
     api.fetchApplicationDetail.mockResolvedValue({
       id: 5,
