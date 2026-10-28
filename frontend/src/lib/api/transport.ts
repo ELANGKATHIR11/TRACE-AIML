@@ -9,6 +9,9 @@
  *   the cookie the previous tab already rotated and is never mistaken for refresh-token reuse.
  * - A definitive refresh rejection (401/403) ends the session: token cleared, `{type: 'logout'}`
  *   broadcast to other tabs, `onAuthFailure` listeners notified — once per refresh attempt.
+ * - A session epoch, bumped whenever the session ends (`setAccessToken(null)`, `endLocalSession`),
+ *   guards late results: a refresh that resolves after logout is discarded, and a request sent
+ *   under an earlier session never refreshes or retries.
  */
 
 const DEFAULT_API_BASE_URL = '/fastapi-proxy';
@@ -77,8 +80,11 @@ export function getApiBaseUrl(): string {
 }
 
 let accessToken: string | null = null;
+/** Incremented every time the session ends; see the module comment. */
+let sessionEpoch = 0;
 
 export function setAccessToken(token: string | null): void {
+  if (token === null) sessionEpoch++;
   accessToken = token;
 }
 
@@ -98,6 +104,7 @@ export function onAuthFailure(cb: () => void): () => void {
 
 /** Drop the in-memory token and notify `onAuthFailure` listeners. Does not broadcast. */
 export function endLocalSession(): void {
+  sessionEpoch++;
   accessToken = null;
   for (const cb of [...authFailureListeners]) {
     try {
@@ -140,17 +147,24 @@ export function postSyncMessage(message: SyncMessage): void {
 // ---------------------------------------------------------------------------
 
 let refreshInFlight: Promise<SessionPayload | null> | null = null;
+let refreshInFlightEpoch = -1;
 
 /**
  * Rotate the refresh cookie once for every concurrent caller in this tab. Resolves with the new
- * session (token already stored), or null when the server rejected the refresh (session ended).
- * Network and server errors reject without ending the session.
+ * session (token already stored), or null when the server rejected the refresh (session ended) or
+ * the session ended while it was in flight (result discarded). Network and server errors reject
+ * without ending the session. A refresh begun under an earlier session is never joined.
  */
 export function refreshSessionShared(): Promise<SessionPayload | null> {
-  if (!refreshInFlight) {
-    refreshInFlight = withRefreshLock(performRefresh).finally(() => {
-      refreshInFlight = null;
+  if (!refreshInFlight || refreshInFlightEpoch !== sessionEpoch) {
+    const epoch = sessionEpoch;
+    const promise: Promise<SessionPayload | null> = withRefreshLock(() =>
+      performRefresh(epoch),
+    ).finally(() => {
+      if (refreshInFlight === promise) refreshInFlight = null;
     });
+    refreshInFlight = promise;
+    refreshInFlightEpoch = epoch;
   }
   return refreshInFlight;
 }
@@ -168,21 +182,35 @@ function withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
   return fn();
 }
 
-async function performRefresh(): Promise<SessionPayload | null> {
+function failRefresh(): null {
+  endLocalSession();
+  postSyncMessage({ type: 'logout' });
+  return null;
+}
+
+async function performRefresh(epoch: number): Promise<SessionPayload | null> {
   const res = await fetch(`${getApiBaseUrl()}${REFRESH_PATH}`, {
     method: 'POST',
     credentials: 'include',
     headers: { Accept: 'application/json' },
   });
-  if (res.status === 401 || res.status === 403) {
-    endLocalSession();
-    postSyncMessage({ type: 'logout' });
-    return null;
-  }
+  // The session ended while this refresh was in flight: its outcome belongs to nobody.
+  if (sessionEpoch !== epoch) return null;
+  if (res.status === 401 || res.status === 403) return failRefresh();
   if (!res.ok) throw await toApiClientError(res, REFRESH_PATH);
-  const session = (await res.json()) as SessionPayload;
+
+  let session: unknown;
+  try {
+    session = await res.json();
+  } catch {
+    session = undefined;
+  }
+  if (sessionEpoch !== epoch) return null;
+  if (!isRecord(session) || typeof session.access_token !== 'string' || !session.access_token) {
+    return failRefresh();
+  }
   accessToken = session.access_token;
-  return session;
+  return session as unknown as SessionPayload;
 }
 
 // ---------------------------------------------------------------------------
@@ -219,15 +247,22 @@ export async function apiRequest<T>(path: string, opts: ApiRequestOptions = {}):
   const endpoint = normalisePath(path);
   const url = `${getApiBaseUrl()}${endpoint}`;
 
+  const epoch = sessionEpoch;
   const tokenUsed = accessToken;
   let res = await send(url, opts, tokenUsed);
 
   const pathOnly = endpoint.split(/[?#]/, 1)[0];
-  if (res.status === 401 && !opts.skipAuthRetry && !NO_REFRESH_PATHS.has(pathOnly)) {
-    // If another request already refreshed while this one was in flight, reuse that token.
+  // A 401 for a request sent under an ended session is final: no refresh, no retry.
+  if (
+    res.status === 401 &&
+    !opts.skipAuthRetry &&
+    !NO_REFRESH_PATHS.has(pathOnly) &&
+    sessionEpoch === epoch
+  ) {
+    // If another request of this session already refreshed while this one was in flight, reuse it.
     const fresh =
       accessToken && accessToken !== tokenUsed ? accessToken : await refreshAccessToken();
-    if (fresh) res = await send(url, opts, fresh);
+    if (fresh && sessionEpoch === epoch) res = await send(url, opts, fresh);
   }
 
   if (!res.ok) throw await toApiClientError(res, endpoint);

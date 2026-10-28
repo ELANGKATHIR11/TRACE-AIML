@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient } from '@tanstack/react-query';
 import { FakeBroadcastChannel } from '../../test/fakeBroadcastChannel';
+import { initCrossTabSync } from './cacheSync';
 
 vi.stubGlobal('BroadcastChannel', FakeBroadcastChannel);
 
@@ -263,6 +265,135 @@ describe('401 handling and single-flight refresh', () => {
       status: 401,
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('session epoch: late results after logout', () => {
+  function deferred<T>() {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => (resolve = r));
+    return { promise, resolve };
+  }
+
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  /** Originals 401 unless sent with `Bearer new`; refresh waits for `releaseRefresh`. */
+  function mockWithPendingRefresh() {
+    const refresh = deferred<Response>();
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).endsWith('/api/auth/refresh')) return refresh.promise;
+      const auth = new Headers(init?.headers).get('Authorization');
+      return auth === 'Bearer new'
+        ? jsonResponse(200, { ok: true })
+        : jsonResponse(401, { detail: 'Not authenticated' });
+    });
+    return { releaseRefresh: () => refresh.resolve(refreshOk('new')) };
+  }
+
+  it('(a) a logout from another tab during refresh discards the refreshed token', async () => {
+    setAccessToken('old');
+    unsubscribers.push(initCrossTabSync(new QueryClient()));
+    const onFail = vi.fn();
+    unsubscribers.push(onAuthFailure(onFail));
+    const { releaseRefresh } = mockWithPendingRefresh();
+
+    const pending = apiError(apiRequest('/api/applications'));
+    await flush();
+    expect(refreshCalls(fetchMock)).toHaveLength(1);
+
+    new FakeBroadcastChannel('trace-sync').postMessage({ type: 'logout' });
+    await flush();
+    expect(onFail).toHaveBeenCalledTimes(1);
+
+    releaseRefresh();
+    const err = await pending;
+
+    expect(err.status).toBe(401);
+    expect(getAccessToken()).toBeNull();
+    expect(onFail).toHaveBeenCalledTimes(1);
+    // original + refresh only: no authenticated retry
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('(b) a local logout during refresh discards the refreshed token', async () => {
+    setAccessToken('old');
+    const onFail = vi.fn();
+    unsubscribers.push(onAuthFailure(onFail));
+    const { releaseRefresh } = mockWithPendingRefresh();
+
+    const pending = apiError(apiRequest('/api/applications'));
+    await flush();
+    expect(refreshCalls(fetchMock)).toHaveLength(1);
+
+    setAccessToken(null);
+    releaseRefresh();
+    const err = await pending;
+
+    expect(err.status).toBe(401);
+    expect(getAccessToken()).toBeNull();
+    expect(onFail).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(FakeBroadcastChannel.posted).toEqual([]);
+  });
+
+  it('(c) a late 401 after a failed refresh starts no second refresh or auth failure', async () => {
+    setAccessToken('old');
+    const onFail = vi.fn();
+    unsubscribers.push(onAuthFailure(onFail));
+    const late = deferred<Response>();
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/api/auth/refresh')) {
+        return jsonResponse(401, { detail: 'Invalid refresh token' });
+      }
+      if (url.endsWith('/api/slow')) return late.promise;
+      return jsonResponse(401, { detail: 'Not authenticated' });
+    });
+
+    const slow = apiError(apiRequest('/api/slow'));
+    await expect(apiError(apiRequest('/api/fast'))).resolves.toMatchObject({ status: 401 });
+    expect(onFail).toHaveBeenCalledTimes(1);
+
+    late.resolve(jsonResponse(401, { detail: 'Not authenticated' }));
+    await expect(slow).resolves.toMatchObject({ status: 401 });
+
+    expect(refreshCalls(fetchMock)).toHaveLength(1);
+    expect(onFail).toHaveBeenCalledTimes(1);
+    expect(FakeBroadcastChannel.posted).toEqual([{ type: 'logout' }]);
+  });
+
+  it('a refresh started under a new session does not join one from an ended session', async () => {
+    setAccessToken('old');
+    const first = deferred<Response>();
+    const second = deferred<Response>();
+    const queue = [first, second];
+    fetchMock.mockImplementation(async () => queue.shift()!.promise);
+
+    const stale = refreshAccessToken();
+    setAccessToken(null);
+    setAccessToken('relogged');
+    const current = refreshAccessToken();
+    expect(current).not.toBe(stale);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    first.resolve(refreshOk('stale-token'));
+    second.resolve(refreshOk('new'));
+    await expect(stale).resolves.toBeNull();
+    await expect(current).resolves.toBe('new');
+    expect(getAccessToken()).toBe('new');
+  });
+
+  it('a 200 refresh without a string access_token is a refresh failure', async () => {
+    setAccessToken('old');
+    const onFail = vi.fn();
+    unsubscribers.push(onAuthFailure(onFail));
+    fetchMock.mockResolvedValue(jsonResponse(200, { token_type: 'bearer', expires_in: 900 }));
+
+    await expect(refreshAccessToken()).resolves.toBeNull();
+
+    expect(getAccessToken()).toBeNull();
+    expect(onFail).toHaveBeenCalledTimes(1);
+    expect(FakeBroadcastChannel.posted).toEqual([{ type: 'logout' }]);
   });
 });
 
