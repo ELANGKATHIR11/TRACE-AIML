@@ -63,3 +63,34 @@ def test_unhandled_error_hides_message(client, caplog):
     assert "secret-path" not in r.text
     assert r.headers["x-content-type-options"] == "nosniff"
     assert any(body["error_id"] in rec.getMessage() for rec in caplog.records)
+
+
+def _get_boom(origin):
+    from app.main import app
+
+    async def boom():
+        raise RuntimeError("x")
+
+    app.add_api_route("/api/_boom", boom)
+    try:
+        return TestClient(app, raise_server_exceptions=False).get(
+            "/api/_boom", headers={"Origin": origin}
+        )
+    finally:
+        app.router.routes[:] = [
+            x for x in app.router.routes if getattr(x, "path", None) != "/api/_boom"
+        ]
+
+
+def test_500_has_cors_for_allowed_origin(client):
+    r = _get_boom("http://localhost:3000")
+    assert r.status_code == 500
+    assert r.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert r.headers["access-control-allow-credentials"] == "true"
+    assert r.headers["vary"] == "Origin"
+
+
+def test_500_no_cors_for_disallowed_origin(client):
+    r = _get_boom("http://evil.test")
+    assert r.status_code == 500
+    assert "access-control-allow-origin" not in r.headers

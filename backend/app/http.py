@@ -45,8 +45,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
     response = JSONResponse(
         status_code=500, content={"detail": "Internal server error", "error_id": error_id}
     )
-    # This handler runs outside the user middleware stack, so add headers here too.
+    # This handler runs outside the user middleware stack (security headers and CORS),
+    # so add both here; browsers need CORS to read error_id.
     apply_security_headers(response, request.url.path)
+    origin = request.headers.get("origin")
+    if origin and origin in settings.cors_origin_list:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
     return response
 
 

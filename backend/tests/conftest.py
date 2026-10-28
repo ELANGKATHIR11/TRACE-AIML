@@ -39,13 +39,16 @@ def template_db() -> Path:
 
 
 @pytest.fixture()
-def db_path(template_db, tmp_path) -> Path:
+def db_path(template_db, tmp_path):
     from app.database import set_engine
 
     dest = tmp_path / "test.db"
     shutil.copyfile(template_db, dest)
     set_engine(f"sqlite:///{dest.as_posix()}")
-    return dest
+    yield dest
+    from app.database import get_engine
+
+    get_engine().dispose()
 
 
 @pytest.fixture()
