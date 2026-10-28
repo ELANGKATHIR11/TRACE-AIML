@@ -1,17 +1,13 @@
 import React, { useState } from 'react';
 import { 
-  Building2, 
-  ExternalLink, 
   ShieldCheck, 
-  AlertTriangle, 
-  Calendar, 
-  MapPin, 
   User, 
   Flame, 
   LandPlot, 
   Award,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  ExternalLink
 } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 import { DocumentItem } from '../types';
@@ -24,73 +20,69 @@ interface AuthorityHubProps {
 export const AuthorityHub: React.FC<AuthorityHubProps> = ({ documents, onSelectDocument }) => {
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
-  // Map statutory channels
   const channels = [
     {
       id: 'STATE_BHULEKH',
-      name: 'State Bhulekh / 7-12 Land Registry',
-      desc: 'Validates land title ownership, institutional land zoning, and total acreage.',
+      name: 'State Bhulekh / 7-12 Revenue Registry',
       typeMatch: 'LAND_OWNERSHIP_DOCUMENT',
       icon: LandPlot,
-      color: '#15803D',
+      color: 'var(--stat-verified-ink)',
     },
     {
       id: 'FIRE_PORTAL',
       name: 'Directorate of Fire Safety Portal',
-      desc: 'Cross-checks NOC validity dates, built-up area clearance, and safety certification.',
       typeMatch: 'FIRE_SAFETY_CERTIFICATE',
       icon: Flame,
-      color: '#C2410C',
+      color: 'var(--brand-saffron)',
     },
     {
       id: 'DIGILOCKER_ESTAMP',
       name: 'DigiLocker / NeSL e-Stamp Gateway',
-      desc: 'Cryptographic authenticity and digital notary signature verification.',
       typeMatch: 'AFFIDAVIT',
       icon: ShieldCheck,
-      color: '#1F3A6E',
+      color: 'var(--brand-navy)',
     },
     {
       id: 'AICTE_NBA_PORTAL',
       name: 'National Board of Accreditation (NBA)',
-      desc: 'Validates tier accreditation, course-specific validity periods, and compliance.',
       typeMatch: 'NBA_ACCREDITATION',
       icon: Award,
-      color: '#7E22CE',
+      color: 'var(--stat-manual-ink)',
     },
     {
       id: 'FACULTY_REGISTRY',
       name: 'State University Faculty Database',
-      desc: 'Verifies faculty rosters, Aadhaar-linked appointments, and Student-Faculty Ratios.',
       typeMatch: 'FACULTY_PROFILE_LIST',
       icon: User,
-      color: '#0284C7',
+      color: '#0369A1',
     },
   ];
 
   return (
-    <div style={{
-      background: 'var(--gov-surface)',
-      border: '1px solid var(--gov-border)',
-      borderRadius: 'var(--radius-md)',
-      padding: '16px',
-      boxShadow: 'var(--shadow-sm)',
-    }}>
+    <section 
+      aria-label="Statutory issuing authority verification hub"
+      style={{
+        backgroundColor: '#FFFFFF',
+        border: 'var(--border-hairline)',
+        borderRadius: 'var(--radius-sm)',
+        padding: '16px',
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
         <div>
-          <h3 style={{ fontSize: '0.9375rem', fontWeight: 700, color: 'var(--gov-primary)' }}>
+          <h2 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--brand-navy)' }}>
             Statutory Issuing Authority Hub
-          </h3>
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Real-time cross-verification with 5 official issuing gateways (SIH PS 26261 Objectives)
+          </h2>
+          <p style={{ fontSize: '12px', color: 'var(--ink-muted)' }}>
+            Real-time cross-verification against authorized statutory issuing gateways
           </p>
         </div>
-        <span style={{ fontSize: '0.75rem', background: '#F1F5F9', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
-          5 Live Gateways
+        <span style={{ fontSize: '12px', backgroundColor: 'var(--surface-subtle)', padding: '2px 7px', borderRadius: 'var(--radius-sm)', fontWeight: 600 }}>
+          5 Statutory Channels
         </span>
       </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
         {channels.map((chan) => {
           const doc = documents.find(d => d.document_type === chan.typeMatch);
           const status = doc ? doc.verification_status : 'PENDING';
@@ -101,47 +93,47 @@ export const AuthorityHub: React.FC<AuthorityHubProps> = ({ documents, onSelectD
             <div
               key={chan.id}
               style={{
-                border: '1px solid var(--gov-border)',
+                border: 'var(--border-subtle)',
                 borderRadius: 'var(--radius-sm)',
-                background: '#FFFFFF',
+                backgroundColor: '#FFFFFF',
                 overflow: 'hidden',
               }}
             >
               <div
                 style={{
-                  padding: '10px 14px',
+                  padding: '9px 12px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   cursor: 'pointer',
-                  background: isExpanded ? 'var(--gov-surface-subtle)' : '#FFFFFF',
+                  backgroundColor: isExpanded ? 'var(--surface-subtle)' : '#FFFFFF',
                 }}
                 onClick={() => doc && setExpandedId(isExpanded ? null : doc.id)}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <div style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '4px',
-                    background: `${chan.color}15`,
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: 'var(--radius-sm)',
+                    backgroundColor: 'var(--surface-subtle)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     color: chan.color,
                   }}>
-                    <Icon size={16} />
+                    <Icon size={15} aria-hidden="true" />
                   </div>
                   <div>
-                    <div style={{ fontSize: '0.8125rem', fontWeight: 600, color: 'var(--text-main)' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--ink-primary)' }}>
                       {chan.name}
                     </div>
-                    <div style={{ fontSize: '0.7rem', color: 'var(--text-subtle)' }}>
-                      {doc ? `Linked: ${doc.filename}` : 'No document uploaded yet'}
+                    <div style={{ fontSize: '11px', color: 'var(--ink-muted)' }}>
+                      {doc ? `Certificate: ${doc.filename}` : 'Pending document submission'}
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <StatusBadge status={status} size="sm" />
                   {doc && (
                     <button
@@ -150,61 +142,55 @@ export const AuthorityHub: React.FC<AuthorityHubProps> = ({ documents, onSelectD
                         onSelectDocument(doc);
                       }}
                       style={{
-                        padding: '4px 8px',
-                        background: 'var(--gov-primary-light)',
-                        border: '1px solid var(--gov-primary)33',
-                        color: 'var(--gov-primary)',
-                        fontSize: '0.75rem',
+                        padding: '3px 8px',
+                        backgroundColor: 'var(--brand-navy-tint)',
+                        border: '1px solid #CBD5E1',
+                        color: 'var(--brand-navy)',
+                        fontSize: '12px',
                         fontWeight: 600,
                         display: 'flex',
                         alignItems: 'center',
                         gap: '4px',
                       }}
                     >
-                      Inspect Evidence
-                      <ExternalLink size={12} />
+                      View
+                      <ExternalLink size={11} aria-hidden="true" />
                     </button>
                   )}
-                  {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                  {isExpanded ? <ChevronUp size={15} aria-hidden="true" /> : <ChevronDown size={15} aria-hidden="true" />}
                 </div>
               </div>
 
-              {/* Expanded Authority Details */}
               {isExpanded && doc && (
                 <div style={{
-                  padding: '12px 16px',
-                  background: '#F8FAFC',
-                  borderTop: '1px solid var(--gov-border)',
-                  fontSize: '0.75rem',
+                  padding: '10px 14px',
+                  backgroundColor: 'var(--surface-subtle)',
+                  borderTop: 'var(--border-subtle)',
+                  fontSize: '12px',
                 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '8px', marginBottom: '8px' }}>
                     <div>
-                      <span style={{ color: 'var(--text-subtle)', display: 'block' }}>Issuing Authority:</span>
-                      <strong>{doc.issuing_authority || 'State Competent Authority'}</strong>
+                      <span style={{ color: 'var(--ink-muted)', display: 'block', fontSize: '11px' }}>Authority:</span>
+                      <strong>{doc.issuing_authority || 'Competent State Authority'}</strong>
                     </div>
                     <div>
-                      <span style={{ color: 'var(--text-subtle)', display: 'block' }}>Certificate / URN Ref:</span>
-                      <strong className="mono">{doc.document_urn_or_id || 'URN-MH-2026-VAL'}</strong>
+                      <span style={{ color: 'var(--ink-muted)', display: 'block', fontSize: '11px' }}>Certificate Ref:</span>
+                      <strong className="mono">{doc.document_urn_or_id || 'URN-2026-VAL'}</strong>
                     </div>
                     <div>
-                      <span style={{ color: 'var(--text-subtle)', display: 'block' }}>Issue Date:</span>
+                      <span style={{ color: 'var(--ink-muted)', display: 'block', fontSize: '11px' }}>Issue Date:</span>
                       <strong>{doc.issue_date || 'N/A'}</strong>
                     </div>
                     <div>
-                      <span style={{ color: 'var(--text-subtle)', display: 'block' }}>Expiry Date:</span>
-                      <strong>{doc.expiry_date || 'Perpetual / Not Expired'}</strong>
+                      <span style={{ color: 'var(--ink-muted)', display: 'block', fontSize: '11px' }}>Expiry Date:</span>
+                      <strong>{doc.expiry_date || 'Perpetual / Active'}</strong>
                     </div>
                   </div>
 
                   {doc.verification_details && Object.keys(doc.verification_details).length > 0 && (
-                    <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed var(--gov-border)' }}>
-                      <span style={{ color: 'var(--text-subtle)', display: 'block', marginBottom: '4px' }}>
-                        Raw Authority Gateway Verification Log:
-                      </span>
-                      <pre className="mono" style={{ background: '#FFFFFF', padding: '8px', border: '1px solid var(--gov-border)', borderRadius: '4px', fontSize: '0.7rem', overflowX: 'auto' }}>
-                        {JSON.stringify(doc.verification_details, null, 2)}
-                      </pre>
-                    </div>
+                    <pre className="mono" style={{ backgroundColor: '#FFFFFF', padding: '6px', border: 'var(--border-subtle)', borderRadius: '2px', fontSize: '11px', overflowX: 'auto' }}>
+                      {JSON.stringify(doc.verification_details, null, 2)}
+                    </pre>
                   )}
                 </div>
               )}
@@ -212,6 +198,6 @@ export const AuthorityHub: React.FC<AuthorityHubProps> = ({ documents, onSelectD
           );
         })}
       </div>
-    </div>
+    </section>
   );
 };

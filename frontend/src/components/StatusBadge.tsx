@@ -15,47 +15,54 @@ interface StatusBadgeProps {
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' }) => {
-  let bg = 'var(--status-unavailable-bg)';
-  let color = 'var(--status-unavailable)';
+  let bg = 'var(--surface-subtle)';
+  let color = 'var(--ink-secondary)';
+  let border = 'var(--border-subtle)';
   let Icon = HelpCircle;
   let label = status;
 
   switch (status) {
     case 'VERIFIED':
-      bg = 'var(--status-verified-bg)';
-      color = 'var(--status-verified)';
+      bg = 'var(--stat-verified-bg)';
+      color = 'var(--stat-verified-ink)';
+      border = 'var(--stat-verified-border)';
       Icon = CheckCircle2;
-      label = 'VERIFIED';
+      label = 'Verified';
       break;
     case 'MISMATCH':
-      bg = 'var(--status-mismatch-bg)';
-      color = 'var(--status-mismatch)';
+      bg = 'var(--stat-mismatch-bg)';
+      color = 'var(--stat-mismatch-ink)';
+      border = 'var(--stat-mismatch-border)';
       Icon = AlertCircle;
-      label = 'MISMATCH DETECTED';
+      label = 'Mismatch Detected';
       break;
     case 'EXPIRED':
-      bg = 'var(--status-expired-bg)';
-      color = 'var(--status-expired)';
+      bg = 'var(--stat-expired-bg)';
+      color = 'var(--stat-expired-ink)';
+      border = 'var(--stat-expired-border)';
       Icon = AlertTriangle;
-      label = 'EXPIRED CERTIFICATE';
+      label = 'Expired';
       break;
     case 'PENDING':
-      bg = 'var(--status-pending-bg)';
-      color = 'var(--status-pending)';
+      bg = 'var(--stat-pending-bg)';
+      color = 'var(--stat-pending-ink)';
+      border = 'var(--stat-pending-border)';
       Icon = Clock;
-      label = 'PENDING VERIFICATION';
+      label = 'Pending Verification';
       break;
     case 'MANUAL_REVIEW_REQUIRED':
-      bg = 'var(--status-manual-bg)';
-      color = 'var(--status-manual)';
+      bg = 'var(--stat-manual-bg)';
+      color = 'var(--stat-manual-ink)';
+      border = 'var(--stat-manual-border)';
       Icon = ShieldAlert;
-      label = 'MANUAL REVIEW REQ.';
+      label = 'Manual Confirmation Required';
       break;
     case 'SOURCE_UNAVAILABLE':
-      bg = 'var(--status-unavailable-bg)';
-      color = 'var(--status-unavailable)';
+      bg = 'var(--surface-subtle)';
+      color = 'var(--ink-muted)';
+      border = '#CBD5E1';
       Icon = HelpCircle;
-      label = 'GATEWAY OFFLINE';
+      label = 'Gateway Offline';
       break;
     default:
       label = status.replace(/_/g, ' ');
@@ -63,23 +70,23 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'sm' })
 
   return (
     <span
+      role="status"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: '4px',
-        padding: size === 'sm' ? '2px 8px' : '4px 10px',
-        fontSize: size === 'sm' ? '0.75rem' : '0.8125rem',
+        gap: '5px',
+        padding: size === 'sm' ? '2px 7px' : '4px 9px',
+        fontSize: size === 'sm' ? '11px' : '12px',
         fontWeight: 600,
         borderRadius: 'var(--radius-sm)',
         backgroundColor: bg,
         color: color,
-        border: `1px solid ${color}33`,
-        textTransform: 'uppercase',
-        letterSpacing: '0.025em',
+        border: `1px solid ${border}`,
+        lineHeight: 1.2,
       }}
     >
-      <Icon size={size === 'sm' ? 12 : 14} />
-      {label}
+      <Icon size={size === 'sm' ? 12 : 14} aria-hidden="true" />
+      <span>{label}</span>
     </span>
   );
 };
@@ -88,21 +95,24 @@ export const SeverityBadge: React.FC<{ severity: FlagSeverity }> = ({ severity }
   const isCrit = severity === 'CRITICAL';
   const isWarn = severity === 'WARNING';
 
-  const color = isCrit ? '#B91C1C' : isWarn ? '#C2410C' : '#1D4ED8';
-  const bg = isCrit ? '#FEF2F2' : isWarn ? '#FFF7ED' : '#EFF6FF';
+  const color = isCrit ? 'var(--stat-mismatch-ink)' : isWarn ? 'var(--stat-expired-ink)' : 'var(--brand-navy)';
+  const bg = isCrit ? 'var(--stat-mismatch-bg)' : isWarn ? 'var(--stat-expired-bg)' : 'var(--brand-navy-tint)';
+  const border = isCrit ? 'var(--stat-mismatch-border)' : isWarn ? 'var(--stat-expired-border)' : '#CBD5E1';
 
   return (
     <span
+      role="status"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         padding: '2px 6px',
-        fontSize: '0.6875rem',
+        fontSize: '11px',
         fontWeight: 700,
         borderRadius: 'var(--radius-sm)',
         backgroundColor: bg,
         color: color,
-        border: `1px solid ${color}44`,
+        border: `1px solid ${border}`,
+        lineHeight: 1.2,
       }}
     >
       {severity}
