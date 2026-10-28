@@ -1,11 +1,11 @@
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from sqlmodel import Session
-from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import applications, audit, auth, dashboard, documents, rules
+from app.api import applications, audit, auth, dashboard, documents, health, rules
 from app.config import settings
 from app.database import get_engine, seed_reference_data
+from app.http import install
 
 
 @asynccontextmanager
@@ -13,6 +13,10 @@ async def lifespan(app: FastAPI):
     with Session(get_engine()) as session:
         seed_reference_data(session)
     yield
+
+
+def _docs(path: str) -> str | None:
+    return path if settings.ENABLE_API_DOCS else None
 
 
 app = FastAPI(
@@ -24,23 +28,12 @@ app = FastAPI(
         "verify regulatory compliance against the Approval Process Handbook."
     ),
     lifespan=lifespan,
+    docs_url=_docs("/docs"),
+    redoc_url=_docs("/redoc"),
+    openapi_url=_docs("/openapi.json"),
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-import os
-from pathlib import Path
-from fastapi.staticfiles import StaticFiles
-
-reports_dir = Path(__file__).resolve().parent.parent / "reports"
-reports_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/reports", StaticFiles(directory=str(reports_dir)), name="reports")
+install(app)
 
 app.include_router(auth.router)
 app.include_router(rules.router)
@@ -48,10 +41,10 @@ app.include_router(applications.router)
 app.include_router(documents.router)
 app.include_router(dashboard.router)
 app.include_router(audit.router)
+app.include_router(health.router)
 
 
 @app.get("/api/models", tags=["Dashboard"])
-@app.get("/models", tags=["Dashboard"])
 def get_root_model_registry(
     db = Depends(dashboard.get_db),
     current_user = Depends(dashboard.get_current_user),
@@ -65,5 +58,4 @@ async def root():
         "project": settings.PROJECT_NAME,
         "project_id": settings.PROJECT_ID,
         "status": "Backend running successfully!",
-        "docs_url": "/docs",
     }
