@@ -2,7 +2,7 @@
 import logging
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -25,6 +25,17 @@ def apply_security_headers(response, path: str) -> None:
         response.headers["Content-Security-Policy"] = _CSP
     if settings.ENVIRONMENT == "production":
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+
+class StatusConflict(HTTPException):
+    """409 for an action not allowed in the resource's current status.
+
+    Rendered as `{"detail": ..., "current_status": ...}` by `status_conflict_handler`.
+    """
+
+    def __init__(self, detail: str, current_status: str):
+        super().__init__(status_code=409, detail=detail)
+        self.current_status = current_status
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -68,6 +79,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     return response
 
 
+async def status_conflict_handler(request: Request, exc: StatusConflict) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, "current_status": exc.current_status},
+    )
+
+
 def install(app: FastAPI) -> None:
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
@@ -78,4 +96,5 @@ def install(app: FastAPI) -> None:
         allow_headers=["Authorization", "Content-Type"],
     )
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(StatusConflict, status_conflict_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

@@ -13,8 +13,9 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.database import get_db
 from app.models.enums import DocumentType, VerificationStatus
-from app.models.models import Application, Document, User
+from app.models.models import Document, User
 from app.schemas.schemas import DocumentRead, DocumentUploadResponse
+from app.services.access import load_application, load_document, require_applicant, require_staff
 from app.services.audit_service import audit_service
 from app.services.security import get_current_user
 from app.services.verification_services import verification_service
@@ -75,15 +76,11 @@ async def upload_document(
     document_type: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_applicant),
 ):
     """Upload a supporting document, calculate SHA-256 for duplicate detection, and store safely."""
+    load_application(db, application_id, current_user, write=True)
     doc_type_enum = parse_document_type(document_type)
-
-    # Verify application exists
-    app_obj = db.get(Application, application_id)
-    if not app_obj:
-        raise HTTPException(status_code=404, detail="Application not found")
 
     # Read bytes
     contents = await file.read()
@@ -164,12 +161,10 @@ async def upload_document(
 def verify_single_document(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ):
     """Run 100% offline OCR, field extraction, and forensic checks on an individual document."""
-    doc = db.get(Document, document_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    doc = load_document(db, document_id, current_user)
 
     result = verification_service.process_document(db, doc)
     return {
@@ -185,6 +180,7 @@ def list_application_documents(
     current_user: User = Depends(get_current_user),
 ):
     """List all documents attached to an application."""
+    load_application(db, application_id, current_user)
     docs = db.exec(select(Document).where(Document.application_id == application_id)).all()
     return docs
 
@@ -195,14 +191,13 @@ def get_document_preview(
     page: int = 1,
     mark: Optional[List[str]] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Return forensic document preview with optional vector bounding box highlights.
     """
     from fastapi.responses import FileResponse, JSONResponse
-    doc = db.get(Document, document_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    doc = load_document(db, document_id, current_user)
 
     file_p = Path(doc.file_path)
     if file_p.exists():
@@ -225,13 +220,12 @@ def get_document_preview(
 def get_document_ela(
     document_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_staff),
 ):
     """
     Execute Error Level Analysis (ELA) to detect JPEG resave splices, cloned seals, and tampered digits.
     """
-    doc = db.get(Document, document_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    doc = load_document(db, document_id, current_user)
 
     from app.services.image_forensics_service import ImageForensicsService
     file_p = Path(doc.file_path)

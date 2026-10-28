@@ -11,7 +11,7 @@ from app.database import get_db
 from app.models.enums import ApplicationStatus, FlagSeverity, VerificationStatus
 from app.models.models import Application, AuditLog, Document, User, ValidationFlag
 from app.services.ollama_service import ollama_service
-from app.services.security import get_current_user
+from app.services.access import require_staff
 
 router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["Dashboard"])
 @router.get("/metrics")
 def get_dashboard_metrics(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ) -> Dict[str, Any]:
     """Return aggregated compliance dashboard metrics."""
     total_apps = db.exec(select(func.count(Application.id))).one()
@@ -194,7 +194,7 @@ def get_dashboard_metrics(
 @router.get("/models")
 def get_model_registry(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ):
     """Return model registry telemetry for the Executive Scrutiny Cockpit."""
     ollama_ok = ollama_service.is_available()

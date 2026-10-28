@@ -109,7 +109,9 @@ class ChecklistRuleUpdate(BaseModel):
 
 # --- Application Schemas ---
 class ApplicationCreate(BaseModel):
-    institution_id: int
+    # institution_id is taken from the authenticated applicant, never from the body (spec §4.3).
+    model_config = ConfigDict(extra="forbid")
+
     academic_year: str = "2026-27"
     category: ApplicationCategory = ApplicationCategory.EOA
     declared_data: Dict[str, Any] = Field(

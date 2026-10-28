@@ -22,23 +22,9 @@ def bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest.fixture(autouse=True)
-def _reset_login_limiter():
-    from app.api.auth import login_limiter
-
-    login_limiter.reset()
-    yield
-    login_limiter.reset()
-
-
 @pytest.fixture()
 def institution_id(session):
     return session.exec(select(Institution)).first().id
-
-
-@pytest.fixture()
-def admin(session):
-    return make_user(session, UserRole.ADMIN)
 
 
 @pytest.fixture()

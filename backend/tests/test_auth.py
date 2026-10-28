@@ -12,15 +12,6 @@ PASSWORD = "Correct-Horse-9"
 GENERIC_401 = {"detail": "Incorrect email or password"}
 
 
-@pytest.fixture(autouse=True)
-def _reset_login_limiter():
-    from app.api.auth import login_limiter
-
-    login_limiter.reset()
-    yield
-    login_limiter.reset()
-
-
 def _login(client, email, password=PASSWORD):
     return client.post("/api/auth/login", data={"username": email, "password": password})
 

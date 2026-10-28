@@ -12,8 +12,15 @@ from app.schemas.schemas import (
     InstitutionCreate,
     InstitutionRead,
 )
+from app.services.access import (
+    load_application,
+    require_admin,
+    require_applicant,
+    require_reviewer,
+    require_staff,
+)
 from app.services.audit_service import log_audit_event
-from app.services.security import get_current_user, require_roles
+from app.services.security import get_current_user
 
 router = APIRouter(
     prefix="/api",
@@ -22,9 +29,15 @@ router = APIRouter(
 
 
 @router.get("/institutions", response_model=List[InstitutionRead])
-def list_institutions(session: Session = Depends(get_session)):
-    """List registered technical institutions along with historical AICTE records."""
-    return session.exec(select(Institution)).all()
+def list_institutions(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """List registered technical institutions (applicants see only their own)."""
+    statement = select(Institution)
+    if current_user.role == UserRole.APPLICANT:
+        statement = statement.where(Institution.id == current_user.institution_id)
+    return session.exec(statement).all()
 
 
 @router.post(
@@ -35,7 +48,7 @@ def list_institutions(session: Session = Depends(get_session)):
 def create_institution(
     payload: InstitutionCreate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(require_roles([UserRole.ADMIN, UserRole.APPLICANT])),
+    current_user: User = Depends(require_admin),
 ):
     existing = session.exec(
         select(Institution).where(
@@ -72,23 +85,28 @@ def create_institution(
 def create_application(
     payload: ApplicationCreate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_applicant),
 ):
     """
     Create a new institutional application (e.g., Extension of Approval).
     Automatically identifies the application category, attaches the relevant
     Approval Process Handbook checklist, and retrieves historical AICTE records (PRD §4.1).
     """
-    institution = session.get(Institution, payload.institution_id)
+    # The institution always comes from the authenticated applicant, never the request body.
+    institution = (
+        session.get(Institution, current_user.institution_id)
+        if current_user.institution_id is not None
+        else None
+    )
     if not institution:
-        raise HTTPException(status_code=404, detail="Institution not found")
+        raise HTTPException(status_code=403, detail="Applicant account is not linked to an institution")
 
     existing_count = len(session.exec(select(Application)).all())
     app_number = f"AICTE-{payload.academic_year[:4]}-{payload.category.name}-{existing_count + 1:04d}"
 
     application = Application(
         application_number=app_number,
-        institution_id=payload.institution_id,
+        institution_id=institution.id,
         submitted_by_user_id=current_user.id,
         academic_year=payload.academic_year,
         category=payload.category,
@@ -134,10 +152,9 @@ def list_applications(
 ):
     """List applications (Applicants see their institution's applications; Officials/Admins see all)."""
     statement = select(Application)
-    if current_user.role == UserRole.APPLICANT and current_user.institution_id:
-        statement = statement.where(
-            Application.institution_id == current_user.institution_id
-        )
+    if current_user.role == UserRole.APPLICANT:
+        # Unconditional: an applicant with no institution matches nothing (spec §4.1).
+        statement = statement.where(Application.institution_id == current_user.institution_id)
     return session.exec(statement).all()
 
 
@@ -151,10 +168,7 @@ def get_application_detail(
     Retrieve full application status, dynamically computed category checklist completeness,
     and historical AICTE baseline records.
     """
-    application = session.get(Application, application_id)
-    if not application:
-        raise HTTPException(status_code=404, detail="Application not found")
-
+    application = load_application(session, application_id, current_user)
     institution = session.get(Institution, application.institution_id)
     return _build_application_detail(session, application, institution)
 
@@ -211,7 +225,7 @@ def _build_application_detail(
 def validate_application(
     application_id: int,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ):
     """
     Trigger 100% offline cross-document reconciliation and regulatory compliance verification
@@ -219,6 +233,7 @@ def validate_application(
     """
     from app.services.verification_services import verification_service
 
+    load_application(session, application_id, current_user)
     try:
         result = verification_service.verify_entire_application(session, application_id)
         return {
@@ -236,122 +251,11 @@ def get_application_flags(
     current_user: User = Depends(get_current_user),
 ):
     """Retrieve all explainable compliance, statutory, and forensic flags for an application."""
+    load_application(session, application_id, current_user)
     flags = session.exec(
         select(ValidationFlag).where(ValidationFlag.application_id == application_id)
     ).all()
     return flags
-
-
-@router.post("/applications/{application_id}/agent-review", tags=["Institutions & Applications (PRD §4.1)"])
-def trigger_agent_review(
-    application_id: int,
-    session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Trigger autonomous multi-agent scrutiny pipeline using CrewAI + local Ollama (Qwen2.5:1.5b).
-    Orchestrates ForensicDocumentAuditor, RegulatoryComplianceOfficer, and VisualEvidenceCompiler.
-    """
-    app_record = session.get(Application, application_id)
-    if not app_record:
-        raise HTTPException(status_code=404, detail="Application not found")
-
-    try:
-        from crewai_autonomous_agent_pipeline import TRACECrewAIEngine
-        engine_crew = TRACECrewAIEngine()
-        report_path = engine_crew.run_autonomous_audit(application_id)
-        
-        # Read the generated markdown summary
-        report_text = ""
-        if report_path and report_path.exists():
-            report_text = report_path.read_text(encoding="utf-8")
-
-        # Update application status based on findings
-        flags = session.exec(select(ValidationFlag).where(ValidationFlag.application_id == application_id)).all()
-        if len(flags) > 0:
-            app_record.status = ApplicationStatus.DEFICIENCY_FLAGGED
-        else:
-            app_record.status = ApplicationStatus.READY_FOR_REVIEW
-        session.add(app_record)
-        session.commit()
-        session.refresh(app_record)
-
-        log_audit_event(
-            session,
-            application_id=app_record.id,
-            action_type="AI_AGENT_REVIEW_COMPLETED",
-            entity_type="Application",
-            entity_id=app_record.application_number,
-            actor=current_user,
-            summary=f"Autonomous AI agent scrutiny completed for application #{app_record.application_number} ({len(flags)} flags)",
-            details={"framework": "CrewAI Autonomous Multi-Agent", "flags_count": len(flags), "status": app_record.status.value},
-        )
-
-        return {
-            "application_id": application_id,
-            "status": "COMPLETED",
-            "framework": "CrewAI Autonomous Multi-Agent",
-            "model": "qwen2.5:1.5b-instruct (Ollama Offline)",
-            "summary": "Multi-agent autonomous forensic audit completed successfully.",
-            "report_path": str(report_path),
-            "stages": [
-                {
-                    "stage_name": "Forensic Document Auditor",
-                    "status": "COMPLETED",
-                    "summary": "Checked software fingerprints (Canva, Photoshop), ELA compression anomalies, and font splices.",
-                },
-                {
-                    "stage_name": "Regulatory Compliance Officer",
-                    "status": "COMPLETED",
-                    "summary": "Audited APH chapter compliance (SFR 1:20 ratio, land area baseline, and cadre distribution).",
-                },
-                {
-                    "stage_name": "Visual Evidence Compiler",
-                    "status": "COMPLETED",
-                    "summary": "Compiled visual bounding boxes and generated court-ready scrutiny dossier.",
-                },
-            ],
-            "executed_at": app_record.updated_at.isoformat(),
-        }
-    except Exception as e:
-        flags = session.exec(select(ValidationFlag).where(ValidationFlag.application_id == application_id)).all()
-        app_record.status = ApplicationStatus.READY_FOR_REVIEW
-        session.add(app_record)
-        session.commit()
-        session.refresh(app_record)
-
-        log_audit_event(
-            session,
-            application_id=app_record.id,
-            action_type="AI_AGENT_REVIEW_FALLBACK",
-            entity_type="Application",
-            entity_id=app_record.application_number,
-            actor=current_user,
-            summary=f"Native rules verification completed for #{app_record.application_number}",
-            details={"framework": "TRACE Native Offline Rules Engine", "error": str(e)},
-        )
-
-        # Fallback to local rule engine if CrewAI encounters dependency or timeout issues
-        return {
-            "application_id": application_id,
-            "status": "COMPLETED_WITH_FALLBACK",
-            "framework": "TRACE Native Offline Rules Engine",
-            "model": "qwen2.5:1.5b-instruct (Ollama)",
-            "summary": f"Audit completed with native engine: {str(e)}",
-            "stages": [
-                {
-                    "stage_name": "Forensic Document Auditor",
-                    "status": "COMPLETED",
-                    "summary": "Verified metadata and digital signatures.",
-                },
-                {
-                    "stage_name": "Regulatory Compliance Officer",
-                    "status": "COMPLETED",
-                    "summary": "Checked declared vs historical records.",
-                },
-            ],
-            "executed_at": app_record.updated_at.isoformat(),
-        }
 
 
 @router.post("/applications/{application_id}/decision", tags=["Institutions & Applications (PRD §4.1)"])
@@ -359,14 +263,12 @@ def submit_officer_decision(
     application_id: int,
     payload: dict,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_reviewer),
 ):
     """
     Record binding statutory determination by an authorized AICTE Scrutiny Officer.
     """
-    app_record = session.get(Application, application_id)
-    if not app_record:
-        raise HTTPException(status_code=404, detail="Application not found")
+    app_record = load_application(session, application_id, current_user)
 
     decision = str(payload.get("decision", "APPROVE")).upper()
     notes = payload.get("officer_notes") or payload.get("notes", "")

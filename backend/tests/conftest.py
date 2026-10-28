@@ -68,6 +68,16 @@ def session(db_path):
 
 
 _user_counter = 0
+_hash_cache: dict = {}
+
+
+def _password_hash(password):
+    # bcrypt is deliberately slow; tests create many users with the same password.
+    from app.services.security import hash_password
+
+    if password not in _hash_cache:
+        _hash_cache[password] = hash_password(password)
+    return _hash_cache[password]
 
 
 def make_user(
@@ -83,14 +93,13 @@ def make_user(
     global _user_counter
     from app.models.enums import UserRole
     from app.models.models import User
-    from app.services.security import hash_password
 
     _user_counter += 1
     role_value = role if isinstance(role, UserRole) else UserRole(role)
     user = User(
         email=email or f"{role_value.value}{_user_counter}@example.test",
         full_name=f"Test {role_value.value} {_user_counter}",
-        hashed_password=hash_password(password),
+        hashed_password=_password_hash(password),
         role=role_value,
         institution_id=institution_id,
         must_change_password=must_change_password,
@@ -99,3 +108,148 @@ def make_user(
     session.commit()
     session.refresh(user)
     return user
+
+
+@pytest.fixture(autouse=True)
+def _reset_login_limiter():
+    """The per-IP login limiter is process-global; isolate it between tests."""
+    from app.api.auth import login_limiter
+
+    login_limiter.reset()
+    yield
+    login_limiter.reset()
+
+
+_counter = 0
+
+
+def _next() -> int:
+    global _counter
+    _counter += 1
+    return _counter
+
+
+def make_institution(session, name=None):
+    from app.models.models import Institution
+
+    n = _next()
+    inst = Institution(
+        aicte_permanent_id=f"9-TEST{n:06d}",
+        name=name or f"Test Institute {n}",
+        state="Maharashtra",
+        district="Pune",
+        address=f"{n} Test Road",
+        established_year=2010,
+        historical_records={},
+    )
+    session.add(inst)
+    session.commit()
+    session.refresh(inst)
+    return inst
+
+
+@pytest.fixture()
+def inst_a(session):
+    return make_institution(session, "Institution A")
+
+
+@pytest.fixture()
+def inst_b(session):
+    return make_institution(session, "Institution B")
+
+
+@pytest.fixture()
+def admin(session):
+    return make_user(session, "admin")
+
+
+@pytest.fixture()
+def reviewer(session):
+    return make_user(session, "reviewer")
+
+
+@pytest.fixture()
+def applicant_a(session, inst_a):
+    return make_user(session, "applicant", institution_id=inst_a.id)
+
+
+@pytest.fixture()
+def applicant_b(session, inst_b):
+    return make_user(session, "applicant", institution_id=inst_b.id)
+
+
+def auth_headers(user) -> dict:
+    """Bearer headers minted directly (no login round-trip: bcrypt + per-IP limiter)."""
+    from app.services.tokens import create_access_token
+
+    return {"Authorization": f"Bearer {create_access_token(user)[0]}"}
+
+
+@pytest.fixture()
+def headers():
+    return auth_headers
+
+
+def make_application(session, institution, status=None):
+    """Create an Application for `institution`, submitted by one of its applicants."""
+    from sqlmodel import select
+
+    from app.models.enums import ApplicationCategory, ApplicationStatus, UserRole
+    from app.models.models import Application, User
+
+    submitter = session.exec(
+        select(User)
+        .where(User.institution_id == institution.id)
+        .where(User.role == UserRole.APPLICANT)
+    ).first() or make_user(session, UserRole.APPLICANT, institution_id=institution.id)
+
+    application = Application(
+        application_number=f"AICTE-TEST-{_next():06d}",
+        institution_id=institution.id,
+        submitted_by_user_id=submitter.id,
+        category=ApplicationCategory.EOA,
+        status=status or ApplicationStatus.DRAFT,
+    )
+    session.add(application)
+    session.commit()
+    session.refresh(application)
+    return application
+
+
+def make_document(session, application, document_type=None, plaintext=b"%PDF-1.4 test"):
+    """Create a Document for `application`. Writes raw bytes until Task 9's encrypted storage."""
+    import hashlib
+
+    from app.config import settings
+    from app.models.enums import DocumentType
+    from app.models.models import Document
+
+    document_type = document_type or DocumentType.AFFIDAVIT
+    save_dir = settings.UPLOAD_DIR / f"app_{application.id}"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    path = save_dir / f"{document_type.value.lower()}_{_next()}.pdf"
+    path.write_bytes(plaintext)
+
+    doc = Document(
+        application_id=application.id,
+        document_type=document_type,
+        filename=path.name,
+        file_path=str(path),
+        mime_type="application/pdf",
+        file_size_bytes=len(plaintext),
+        sha256_hash=hashlib.sha256(plaintext).hexdigest(),
+    )
+    session.add(doc)
+    session.commit()
+    session.refresh(doc)
+    return doc
+
+
+@pytest.fixture(name="make_application")
+def _make_application_fixture():
+    return make_application
+
+
+@pytest.fixture(name="make_document")
+def _make_document_fixture():
+    return make_document

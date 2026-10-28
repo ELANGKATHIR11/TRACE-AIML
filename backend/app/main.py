@@ -2,10 +2,12 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from sqlmodel import Session
 
-from app.api import admin, applications, audit, auth, dashboard, documents, health, rules
+from app.api import admin, applications, audit, auth, dashboard, documents, health, intelligence, rules
 from app.config import settings
 from app.database import get_engine, seed_reference_data
 from app.http import install
+from app.models.models import User
+from app.services.access import require_staff
 
 
 @asynccontextmanager
@@ -42,21 +44,13 @@ app.include_router(applications.router)
 app.include_router(documents.router)
 app.include_router(dashboard.router)
 app.include_router(audit.router)
+app.include_router(intelligence.router)
 app.include_router(health.router)
 
 
 @app.get("/api/models", tags=["Dashboard"])
 def get_root_model_registry(
-    db = Depends(dashboard.get_db),
-    current_user = Depends(dashboard.get_current_user),
+    db: Session = Depends(dashboard.get_db),
+    current_user: User = Depends(require_staff),
 ):
     return dashboard.get_model_registry(db, current_user)
-
-
-@app.get("/", tags=["Health"])
-async def root():
-    return {
-        "project": settings.PROJECT_NAME,
-        "project_id": settings.PROJECT_ID,
-        "status": "Backend running successfully!",
-    }

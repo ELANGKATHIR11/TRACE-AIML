@@ -6,7 +6,7 @@ from sqlmodel import Session, col, select
 
 from app.database import get_session
 from app.models.models import AuditLog, User
-from app.services.security import get_current_user
+from app.services.access import require_staff
 
 router = APIRouter(
     prefix="/api/audit",
@@ -20,7 +20,7 @@ def list_audit_logs(
     application_id: Optional[int] = None,
     limit: int = 100,
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ):
     """
     Fetch immutable audit trail entries ordered newest first with computed SHA-256 cryptographic hashes.
@@ -65,7 +65,7 @@ def list_audit_logs(
 @router.get("/verify-chain")
 def verify_audit_chain(
     session: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ):
     """
     Cryptographically verify the SHA-256 Merkle chain integrity of all audit trail entries.
