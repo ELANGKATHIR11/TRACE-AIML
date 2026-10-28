@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
 from app.models.enums import (
     ApplicationCategory,
@@ -14,14 +14,6 @@ from app.models.enums import (
 
 
 # --- Auth & User Schemas ---
-class UserCreate(BaseModel):
-    email: EmailStr
-    full_name: str
-    password: str = Field(min_length=6)
-    role: UserRole = UserRole.APPLICANT
-    institution_id: Optional[int] = None
-
-
 class UserRead(BaseModel):
     id: int
     email: str
@@ -29,13 +21,21 @@ class UserRead(BaseModel):
     role: UserRole
     institution_id: Optional[int]
     is_active: bool
+    must_change_password: bool
     created_at: datetime
 
 
-class TokenResponse(BaseModel):
+class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    expires_in: int
     user: UserRead
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+    # Policy (length, not equal to email) is enforced by security.validate_password_policy.
+    new_password: str = Field(max_length=1024)
 
 
 # --- Institution Schemas ---

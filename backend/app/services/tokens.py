@@ -93,6 +93,10 @@ def issue_refresh_token(
     return raw, row
 
 
+def find_refresh_token(session: Session, raw: str) -> Optional[RefreshToken]:
+    return session.exec(select(RefreshToken).where(RefreshToken.token_hash == _hash(raw))).first()
+
+
 def _revoke_family_rows(session: Session, family_id: str) -> None:
     now = utc_now()
     rows = session.exec(
@@ -139,7 +143,7 @@ def _reuse_detected(session: Session, row: RefreshToken, user: Optional[User]) -
 
 
 def rotate_refresh_token(session: Session, raw: str) -> tuple[User, str, RefreshToken]:
-    row = session.exec(select(RefreshToken).where(RefreshToken.token_hash == _hash(raw))).first()
+    row = find_refresh_token(session, raw)
     if row is None:
         raise RefreshTokenError("Invalid refresh token")
 
