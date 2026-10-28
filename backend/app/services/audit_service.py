@@ -48,8 +48,11 @@ def compute_record_hash(row: AuditLog) -> str:
     ).hexdigest()
 
 
-def _lock_chain(session: Session) -> None:
-    """Serialise chain appends for the rest of the session's current transaction.
+def acquire_write_lock(session: Session) -> None:
+    """Serialise writers for the rest of the session's current transaction.
+
+    Used for chain appends and for status transitions (`workflow.transition`). Reentrant within
+    a transaction, so a transition followed by `log_audit_event` in the same transaction is safe.
 
     SQLite: the engine keeps pysqlite's default transaction handling, in which the driver only
     opens a transaction implicitly before a DML statement. If no transaction is open we start one
@@ -88,7 +91,7 @@ def log_audit_event(
     # column would otherwise re-encode differently cannot make a genuine row fail verification.
     stored_details = json.loads(canonical_json(details or {}))
 
-    _lock_chain(session)
+    acquire_write_lock(session)
     tail = session.exec(
         select(AuditLog.record_hash).order_by(col(AuditLog.id).desc()).limit(1)
     ).first()

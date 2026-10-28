@@ -11,7 +11,7 @@ from app.services.audit_service import log_audit_event
 def _build_engine(url: str) -> Engine:
     # SQLite: `timeout` makes a writer wait (up to 30 s) for the database write lock instead of
     # failing immediately with "database is locked" — audit appends take that lock with
-    # BEGIN IMMEDIATE (see audit_service._lock_chain). pysqlite's default transaction handling
+    # BEGIN IMMEDIATE (see audit_service.acquire_write_lock). pysqlite's default transaction handling
     # is kept deliberately: it only opens a transaction before DML, so plain reads never hold
     # a SHARED lock across a request and cannot block other connections' commits.
     connect_args = {"check_same_thread": False, "timeout": 30} if url.startswith("sqlite") else {}

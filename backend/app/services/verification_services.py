@@ -192,9 +192,8 @@ class VerificationService:
         else:
             target = ApplicationStatus.READY_FOR_REVIEW
         workflow.transition(db, application, target, allowed_from=workflow.REVIEWABLE)
-        db.commit()
-        db.refresh(application)
 
+        # Commits the flags, summary and status change together with the audit entry.
         log_audit_event(
             db,
             action_type="APPLICATION_VALIDATION_COMPLETED",

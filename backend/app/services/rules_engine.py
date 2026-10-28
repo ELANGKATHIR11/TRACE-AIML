@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from app.models.enums import FlagCategory, FlagSeverity
-from app.models.models import Application, ChecklistRule, Document, ValidationFlag
+from app.models.models import Application, ChecklistRule, Document
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +131,12 @@ class RulesEngine:
                 })
 
         # 3. Student-Faculty Ratio (SFR) & Faculty Norms
-        total_students = declared.get("total_approved_intake") or declared.get("student_count")
+        # `total_intake` is the DeclaredData field; the others are legacy keys (seeded dossiers).
+        total_students = (
+            declared.get("total_intake")
+            or declared.get("total_approved_intake")
+            or declared.get("student_count")
+        )
         faculty_doc = extracted_by_type.get("FACULTY_ROSTER", {})
         proven_faculty = faculty_doc.get("total_faculty_count") or len(faculty_doc.get("faculty_members", []))
 

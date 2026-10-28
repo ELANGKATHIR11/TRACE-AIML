@@ -278,3 +278,118 @@ def test_application_numbers_unique(client, headers, applicant_a):
         numbers.append(r.json()["application_number"])
     assert numbers[0] != numbers[1]
     assert all(n.startswith("AICTE-2026-EOA-") for n in numbers)
+
+
+# ------------------------------------------------------------- concurrency & atomicity
+def _change_status_concurrently(monkeypatch, application_id, new_status):
+    """Commit a status change from a separate session just before the guarded transition runs."""
+    from sqlmodel import Session
+
+    from app.database import get_engine
+    from app.services import workflow
+
+    original = workflow.transition
+
+    def racing_transition(session, application, target, *, allowed_from):
+        with Session(get_engine()) as other:
+            row = other.get(Application, application_id)
+            row.status = new_status
+            other.add(row)
+            other.commit()
+        return original(session, application, target, allowed_from=allowed_from)
+
+    monkeypatch.setattr(workflow, "transition", racing_transition)
+
+
+def test_concurrent_status_change_blocks_decision(client, session, headers, reviewer, inst_a, make_application, monkeypatch):
+    application = make_application(session, inst_a, status=ApplicationStatus.READY_FOR_REVIEW)
+    _change_status_concurrently(monkeypatch, application.id, ApplicationStatus.APPROVED_BY_REVIEWER)
+
+    r = _decide(client, headers(reviewer), application.id, decision="REJECT")
+    assert r.status_code == 409, r.text
+    assert r.json()["current_status"] == "APPROVED_BY_REVIEWER"
+
+    session.expire_all()
+    assert session.get(Application, application.id).status == ApplicationStatus.APPROVED_BY_REVIEWER
+    assert session.exec(select(OfficerDecision)).first() is None
+    assert session.exec(
+        select(AuditLog).where(AuditLog.action_type.startswith("OFFICER_DECISION_"))
+    ).first() is None
+
+
+def test_concurrent_status_change_blocks_validate(client, session, headers, reviewer, inst_a, make_application, monkeypatch):
+    application = make_application(session, inst_a, status=ApplicationStatus.SUBMITTED)
+    _change_status_concurrently(monkeypatch, application.id, ApplicationStatus.APPROVED_BY_REVIEWER)
+
+    r = client.post(f"/api/applications/{application.id}/validate", headers=headers(reviewer))
+    assert r.status_code == 409, r.text
+    assert r.json()["current_status"] == "APPROVED_BY_REVIEWER"
+
+    session.expire_all()
+    assert session.get(Application, application.id).status == ApplicationStatus.APPROVED_BY_REVIEWER
+    assert session.exec(
+        select(AuditLog).where(AuditLog.action_type == "APPLICATION_VALIDATION_COMPLETED")
+    ).first() is None
+
+
+def test_validate_status_and_audit_commit_together(client, session, headers, reviewer, inst_a, make_application, monkeypatch):
+    from app.services import verification_services
+
+    application = make_application(session, inst_a, status=ApplicationStatus.SUBMITTED)
+
+    def failing_audit(*args, **kwargs):
+        raise RuntimeError("audit write failed")
+
+    monkeypatch.setattr(verification_services, "log_audit_event", failing_audit)
+    with pytest.raises(RuntimeError):
+        client.post(f"/api/applications/{application.id}/validate", headers=headers(reviewer))
+
+    session.expire_all()
+    assert session.get(Application, application.id).status == ApplicationStatus.SUBMITTED
+
+
+# ------------------------------------------------------------------ declared intake
+def test_sfr_flag_uses_declared_total_intake(client, session, headers, applicant_a):
+    from app.models.models import ChecklistRule, Document
+    from app.services.rules_engine import rules_engine
+
+    body = {**CREATE_BODY, "declared_data": {"total_intake": 600, "faculty_count": 10}}
+    r = client.post("/api/applications", headers=headers(applicant_a), json=body)
+    assert r.status_code == 201, r.text
+    application = session.get(Application, r.json()["id"])
+
+    roster = Document(
+        application_id=application.id,
+        document_type=DocumentType.FACULTY_ROSTER,
+        filename="roster.pdf",
+        file_path="unused",
+        sha256_hash="0" * 64,
+        extracted_fields={"total_faculty_count": 10},
+    )
+    rules = session.exec(select(ChecklistRule)).all()
+    compliance = rules_engine.evaluate_application_compliance(application, [roster], rules)
+
+    sfr = [f for f in compliance["flags"] if f.get("field_name") == "faculty_student_ratio"]
+    assert len(sfr) == 1
+    assert "1:60.0" in sfr[0]["reason"]
+
+
+@pytest.mark.parametrize(
+    "declared", [{"total_intake": 360}, {"approved_intake_baseline": 360}], ids=["total_intake", "legacy"]
+)
+def test_authority_intake_mismatch_uses_declared_total_intake(declared):
+    from app.services.issuing_authority_hub import issuing_authority_hub
+
+    result = issuing_authority_hub._compare_against_authority_record(
+        document_type=DocumentType.PREVIOUS_EOA_LETTER,
+        urn="EOA-TEST-1",
+        registry_key="AICTE",
+        authority_record={"authority_name": "AICTE", "approved_intake_total": 420},
+        extracted_fields={},
+        declared_data=declared,
+        digital_sig_info={},
+        qr_info={},
+        now_iso="2026-10-28T00:00:00+00:00",
+    )
+    assert [f["field_name"] for f in result["flags"]] == ["approved_intake_total"]
+    assert "declared baseline is 360" in result["flags"][0]["reason"]

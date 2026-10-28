@@ -6,8 +6,10 @@
                                                          | RECTIFICATION_REQUESTED
 
 A disallowed transition is a 409 carrying `current_status` (see `app.http.StatusConflict`).
-Transitions only stage the change on the session; the caller commits it, normally through
-`log_audit_event`, so the status change and its audit entry land in one transaction.
+`transition` takes the database write lock and re-reads the committed status before changing it,
+so two concurrent requests cannot both pass the check. It only stages the change; the caller
+commits it, normally through `log_audit_event` (which reuses the lock), so the status change and
+its audit entry land in one transaction.
 """
 from typing import AbstractSet, List
 
@@ -16,6 +18,7 @@ from sqlmodel import Session, col, select
 from app.http import StatusConflict
 from app.models.enums import ApplicationStatus, OfficerDecisionType
 from app.models.models import Application, ChecklistRule, Document, utc_now
+from app.services.audit_service import acquire_write_lock
 
 SUBMITTABLE = frozenset({ApplicationStatus.DRAFT})
 # validate and agent-review
@@ -51,8 +54,21 @@ def transition(
     *,
     allowed_from: AbstractSet[ApplicationStatus],
 ) -> None:
-    """Move `application` to `target` (staged, not committed); 409 if not allowed from here."""
-    ensure_status(application, allowed_from, f"move to {target.value}")
+    """Move `application` to `target` (staged, not committed); 409 if not allowed from here.
+
+    The in-memory status may be stale (it was read without a lock), so the committed status is
+    re-read under the write lock, which is held until the caller's commit or rollback.
+    """
+    action = f"move to {target.value}"
+    ensure_status(application, allowed_from, action)  # cheap early exit, before locking
+    acquire_write_lock(session)
+    committed = session.exec(
+        select(Application.status).where(Application.id == application.id)
+    ).one()
+    if committed not in allowed_from:
+        raise StatusConflict(
+            f"Cannot {action} an application in status {committed.value}", committed.value
+        )
     application.status = target
     application.updated_at = utc_now()
     session.add(application)
