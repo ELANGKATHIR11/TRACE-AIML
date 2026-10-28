@@ -87,94 +87,28 @@ Output valid JSON only:
         if not text:
             return data
 
-        # Extract labeled Issue Date and Expiry Date first
-        issue_m = re.search(r"(?:issue\s*date|dated|date\s*of\s*issue|issued\s*on)\s*[:\-]?\s*(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", text, re.IGNORECASE)
-        if issue_m:
-            data["issue_date"] = issue_m.group(1).strip()
-
-        expiry_m = re.search(r"(?:expiry\s*date|valid\s*until|valid\s*upto|validity|expires\s*on)\s*[:\-]?\s*(\d{4}[/-]\d{1,2}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})", text, re.IGNORECASE)
-        if expiry_m:
-            data["expiry_date"] = expiry_m.group(1).strip()
-
-        # Extract dates fallback
+        # Extract dates
         date_pattern = r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})\b"
         dates = re.findall(date_pattern, text)
         if dates:
-            data["detected_dates"] = dates[:4]
-            if "issue_date" not in data:
-                data["issue_date"] = dates[0]
-            if "expiry_date" not in data and len(dates) >= 2:
-                data["expiry_date"] = dates[1]
+            data["detected_dates"] = dates[:3]
+            data["issue_date"] = dates[0]
 
         # Extract land area
-        land_match = re.search(r"(\d+(\.\d+)?)\s*(acres?|hectares?)", text, re.IGNORECASE)
+        land_match = re.search(r"(\d+(\.\d+)?)\s*(acres?|hectares?|sq\.?\s*meters?|sqm)", text, re.IGNORECASE)
         if land_match:
             data["land_area"] = land_match.group(0)
             data["land_area_acres"] = float(land_match.group(1))
 
-        # Extract built-up / building area in sqm
-        area_match = re.search(r"(?:built[-\s]*up\s*area|building\s*area|carpet\s*area|total\s*area)\s*[:\-]?\s*(\d+(?:\.\d+)?)\s*(?:sq\.?\s*m|sqm|square\s*meters?)?", text, re.IGNORECASE)
-        if not area_match:
-            area_match = re.search(r"(\d{3,6}(?:\.\d+)?)\s*(?:sq\.?\s*meters?|sqm|sq\.m)", text, re.IGNORECASE)
-        if area_match:
-            val_sqm = float(area_match.group(1))
-            data["building_area_sqm"] = val_sqm
-            data["built_up_area_sqm"] = val_sqm
-            data["total_built_up_area"] = val_sqm
-
-        # Extract certificate, survey, URN, stamp paper, or EoA reference numbers
-        cert_match = re.search(r"(?:certificate\s*no\.?|survey\s*no\.?|registration\s*no\.?|urn|ref\s*no\.?)\s*[:\-]?\s*([A-Z0-9/-]{4,35})", text, re.IGNORECASE)
+        # Extract certificate or survey numbers
+        cert_match = re.search(r"(certificate\s*no\.?|survey\s*no\.?|registration\s*no\.?|ref\s*no\.?)[:\s]*([A-Z0-9/-]+)", text, re.IGNORECASE)
         if cert_match:
-            val_id = cert_match.group(1).strip()
-            data["document_id_or_number"] = val_id
-            data["certificate_number"] = val_id
-
-        eoa_match = re.search(r"(F\.No\.\s*[A-Za-z]+/[\d-]+/\d{4}/EOA|EOA-\d{4}-\d+)", text, re.IGNORECASE)
-        if eoa_match:
-            data["eoa_reference_number"] = eoa_match.group(1).strip()
-            data.setdefault("document_id_or_number", eoa_match.group(1).strip())
-
-        stamp_match = re.search(r"(?:stamp\s*paper\s*no\.?|e-stamp\s*no\.?)\s*[:\-]?\s*([A-Z0-9-]+)", text, re.IGNORECASE)
-        if stamp_match:
-            data["stamp_paper_number"] = stamp_match.group(1).strip()
-            data.setdefault("document_id_or_number", stamp_match.group(1).strip())
-
-        aicte_id_match = re.search(r"(?:aicte\s*permanent\s*id|permanent\s*id|aicte\s*id)\s*[:\-]?\s*(1-\d{7,12})", text, re.IGNORECASE)
-        if aicte_id_match:
-            data["aicte_permanent_id"] = aicte_id_match.group(1).strip()
-
-        deponent_match = re.search(r"(?:deponent\s*name|sworn\s*by|principal\s*name|deponent)\s*[:\-]?\s*([A-Za-z. ]{4,50})", text, re.IGNORECASE)
-        if deponent_match:
-            data["deponent_name"] = deponent_match.group(1).strip()
-
-        auth_match = re.search(r"(?:issuing\s*authority|issued\s*by)\s*[:\-]?\s*([A-Za-z0-9 &.,()-]{5,80})", text, re.IGNORECASE)
-        if auth_match:
-            data["issuing_authority"] = auth_match.group(1).strip()
-
-        intake_match = re.search(r"(?:approved\s*intake\s*total|approved\s*intake|total\s*intake)\s*[:\-]?\s*(\d{2,4})", text, re.IGNORECASE)
-        if intake_match:
-            data["approved_intake_total"] = int(intake_match.group(1))
-
-        fac_match = re.search(r"(?:total\s*faculty\s*count|faculty\s*count|verified\s*faculty)\s*[:\-]?\s*(\d{1,4})", text, re.IGNORECASE)
-        if fac_match:
-            data["total_faculty_count"] = int(fac_match.group(1))
-
-        cls_match = re.search(r"(?:classrooms?\s*count|total\s*classrooms?)\s*[:\-]?\s*(\d{1,3})", text, re.IGNORECASE)
-        if cls_match:
-            data["classrooms_count"] = int(cls_match.group(1))
-
-        lab_match = re.search(r"(?:laboratories\s*count|labs?\s*count|total\s*labs?)\s*[:\-]?\s*(\d{1,3})", text, re.IGNORECASE)
-        if lab_match:
-            data["laboratories_count"] = int(lab_match.group(1))
+            data["document_id_or_number"] = cert_match.group(2)
 
         # Extract institution name candidates
-        inst_labeled = re.search(r"(?:institution\s*name|name\s*of\s*institution)\s*[:\-]?\s*([A-Za-z &.,-]{6,80})", text, re.IGNORECASE)
-        if inst_labeled:
-            data["institution_name"] = inst_labeled.group(1).strip()
-        else:
-            inst_match = re.search(r"([A-Za-z]+\s+(?:Institute|College|University|Polytechnic)\s+of\s+[A-Za-z &]+)", text, re.IGNORECASE)
-            if inst_match:
-                data["institution_name"] = inst_match.group(1).strip()
+        inst_match = re.search(r"(institute|college|university|trust|polytechnic)\s+of\s+[\w\s]+", text, re.IGNORECASE)
+        if inst_match:
+            data["institution_name"] = inst_match.group(0).strip()
 
         return data
 

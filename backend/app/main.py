@@ -1,8 +1,8 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import applications, audit, auth, dashboard, documents, intelligence, rules
+from app.api import applications, audit, auth, dashboard, documents, rules
 from app.config import settings
 from app.database import init_db_and_seed
 
@@ -24,20 +24,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Secure CORS Configuration: Do not permit wildcard origin with credentials
-ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "http://127.0.0.1:3000",
-    "http://127.0.0.1:5173",
-    "http://localhost:8000",
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -55,7 +46,15 @@ app.include_router(applications.router)
 app.include_router(documents.router)
 app.include_router(dashboard.router)
 app.include_router(audit.router)
-app.include_router(intelligence.router)
+
+
+@app.get("/api/models", tags=["Dashboard"])
+@app.get("/models", tags=["Dashboard"])
+def get_root_model_registry(
+    db = Depends(dashboard.get_db),
+    current_user = Depends(dashboard.get_current_user),
+):
+    return dashboard.get_model_registry(db, current_user)
 
 
 @app.get("/", tags=["Health"])

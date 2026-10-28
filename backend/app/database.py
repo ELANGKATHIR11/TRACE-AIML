@@ -200,11 +200,3 @@ def init_db_and_seed() -> None:
                 )
             )
             session.commit()
-
-        # 4. Seed the 4 Golden SIH26261 Evaluation Dossiers if not present
-        try:
-            from app.services.golden_dossiers_service import seed_golden_dossiers
-            seed_golden_dossiers(session)
-        except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning(f"Golden dossier seeding warning: {e}")

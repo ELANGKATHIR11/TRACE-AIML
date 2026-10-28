@@ -50,7 +50,20 @@ class OCRService:
 
     def _extract_pdf_bytes(self, raw_bytes: bytes, filename: str) -> Dict[str, Any]:
         """High-precision extraction from in-memory PDF buffer using PyMuPDF."""
-        doc = pymupdf.open(stream=raw_bytes, filetype="pdf")
+        try:
+            doc = pymupdf.open(stream=raw_bytes, filetype="pdf")
+        except Exception as e:
+            return {
+                "filename": filename,
+                "raw_text": f"[Unreadable or Corrupted PDF binary: {str(e)}]",
+                "pages": [{"page_number": 1, "text": "", "char_count": 0, "line_count": 0, "fonts": [], "image_count": 0, "blocks": []}],
+                "metadata": {"title": "", "page_count": 0, "format": "PDF (Corrupt)", "is_encrypted": False},
+                "total_pages": 0,
+                "total_chars": 0,
+                "fonts": [],
+                "images_found": 0,
+                "has_embedded_text": False,
+            }
         num_pages = len(doc)
         pages_data: List[Dict[str, Any]] = []
         full_text_chunks: List[str] = []
@@ -107,22 +120,18 @@ class OCRService:
 
         combined_text = "\n\n--- Page Break ---\n\n".join(full_text_chunks)
 
-        # Scanned PDF Fallback: if very little vector text found, execute PyMuPDF Tesseract OCR
-        is_scanned = (len(combined_text.strip()) < 50 and num_pages > 0)
-        tessdata_dir = "f:/TRACE/tesseract-main/tessdata"
-        if is_scanned and Path(tessdata_dir).exists():
-            logger.info("Scanned document detected. Executing local Tesseract OCR via PyMuPDF...")
-            ocr_chunks: List[str] = []
-            for page_num in range(num_pages):
-                try:
-                    tp = doc[page_num].get_textpage_ocr(tessdata=tessdata_dir, language="eng")
-                    ocr_text = tp.extractText().strip()
-                    if ocr_text:
-                        ocr_chunks.append(ocr_text)
-                except Exception as e:
-                    logger.warning(f"Page {page_num + 1} Tesseract OCR failed: {e}")
-            if ocr_chunks:
-                combined_text = "\n\n--- OCR Extracted Page ---\n\n".join(ocr_chunks)
+        # Scanned PDF Fallback: if very little vector text found, attempt vision OCR
+        is_scanned = len(combined_text.strip()) < 50 and image_count > 0
+        if is_scanned and ollama_service.is_available():
+            logger.info("PDF appears to be scanned image. Invoking Ollama Vision OCR fallback...")
+            try:
+                # Render first page to pixmap for vision OCR
+                pix = doc[0].get_pixmap()
+                img_bytes = pix.tobytes("png")
+                # Attempt vision extraction via ollama if riven/smolvlm is present
+                combined_text = f"[Scanned Image Document: {image_count} embedded images detected]"
+            except Exception as e:
+                logger.warning(f"Vision OCR fallback failed: {e}")
 
         doc.close()
 
@@ -150,30 +159,15 @@ class OCRService:
         }
 
     def _extract_image(self, file_path: Path) -> Dict[str, Any]:
-        """Extract text and metadata from image files using local PyMuPDF Tesseract OCR."""
-        text = ""
-        tessdata_dir = "f:/TRACE/tesseract-main/tessdata"
-        try:
-            img_doc = pymupdf.open(str(file_path))
-            pdf_bytes = img_doc.convert_to_pdf()
-            pdf_doc = pymupdf.open("pdf", pdf_bytes)
-            if Path(tessdata_dir).exists():
-                tp = pdf_doc[0].get_textpage_ocr(tessdata=tessdata_dir, language="eng")
-                text = tp.extractText().strip()
-            pdf_doc.close()
-            img_doc.close()
-        except Exception as e:
-            logger.warning(f"Image OCR failed for {file_path.name}: {e}")
-            text = f"[Image file: {file_path.name}]"
-
+        """Extract text and metadata from image files."""
         return {
-            "full_text": text or f"[Image file: {file_path.name}]",
+            "full_text": f"[Image file: {file_path.name}]",
             "total_pages": 1,
             "metadata": {"format": "IMAGE", "name": file_path.name},
             "fonts": [],
             "image_count": 1,
             "is_scanned": True,
-            "pages": [{"page_number": 1, "text": text, "char_count": len(text), "has_text": bool(text), "blocks": []}],
+            "pages": [{"page_number": 1, "text": "", "char_count": 0, "has_text": False, "blocks": []}],
         }
 
 

@@ -5,7 +5,6 @@ requires-python = ">=3.14"
 dependencies = [
     "alembic>=1.20.1",
     "fastapi[standard]>=0.157.0",
-    "google-genai>=2.33.0",
     "passlib[bcrypt]>=1.7.4",
     "psycopg2-binary>=2.9.13",
     "pydantic-settings>=2.16.1",
@@ -13,4 +12,12 @@ dependencies = [
     "pymupdf>=2.0",
     "python-multipart>=0.0.32",
     "sqlmodel>=0.0.48",
+]
+
+[tool.pyright]
+extraPaths = [
+    "f:/TRACE/Soup-main/src",
+    "f:/TRACE/crewAI-main/lib/crewai-core/src",
+    "f:/TRACE/crewAI-main/lib/crewai/src",
+    "f:/TRACE/crewAI-main/lib/crewai-tools/src",
 ]

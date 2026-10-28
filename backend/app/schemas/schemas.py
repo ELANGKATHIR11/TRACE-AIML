@@ -125,6 +125,7 @@ class ApplicationDetailResponse(BaseModel):
 
 # --- Document & Flag Schemas ---
 class DocumentUploadResponse(BaseModel):
+    id: Optional[int] = None
     document_id: int
     application_id: int
     filename: str

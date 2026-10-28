@@ -40,9 +40,8 @@ from app.models.models import Application, Document, ValidationFlag
 from app.services.ollama_service import ollama_service
 from app.services.visual_evidence_service import generate_visual_highlight_evidence
 
-# Configure 100% Local Air-Gapped LLM for CrewAI via LiteLLM + Ollama
 local_ollama_llm = LLM(
-    model="ollama/qwen2.5:1.5b-instruct",
+    model="ollama/soup-trace-lite:latest",
     base_url="http://localhost:11434",
     temperature=0.1,
 )

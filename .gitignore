@@ -36,6 +36,17 @@ ENV/
 htmlcov/
 *.log
 
-# Databases
+# Databases & uploads
 *.db
 *.sqlite3
+uploads/
+backend/uploads/
+chroma_db/
+backend/chroma_db/
+
+# Frontend
+node_modules/
+frontend/node_modules/
+.npm/
+*.local
+
