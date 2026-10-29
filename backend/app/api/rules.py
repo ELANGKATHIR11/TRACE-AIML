@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models.enums import ApplicationCategory, UserRole
+from app.models.enums import ApplicationCategory
 from app.models.models import ChecklistRule, User
 from app.schemas.schemas import ChecklistRuleCreate, ChecklistRuleUpdate
 from app.services.audit_service import log_audit_event
-from app.services.security import require_roles
+from app.services.access import require_admin
+from app.services.security import get_current_user
 
 router = APIRouter(
     prefix="/api/rules",
@@ -22,6 +23,7 @@ def list_checklist_rules(
     handbook_year: Optional[str] = None,
     active_only: bool = True,
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """
     Retrieve configurable checklist rules derived from the AICTE Approval Process Handbook.
@@ -41,7 +43,7 @@ def list_checklist_rules(
 def create_checklist_rule(
     payload: ChecklistRuleCreate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(require_roles([UserRole.ADMIN])),
+    current_user: User = Depends(require_admin),
 ):
     """
     (Admin Only) Add a new configurable regulatory rule based on the AICTE Approval Process Handbook.
@@ -68,7 +70,7 @@ def update_checklist_rule(
     rule_id: int,
     payload: ChecklistRuleUpdate,
     session: Session = Depends(get_session),
-    current_user: User = Depends(require_roles([UserRole.ADMIN])),
+    current_user: User = Depends(require_admin),
 ):
     """
     (Admin Only) Modify an existing regulatory checklist rule (PRD §5 Configurability).

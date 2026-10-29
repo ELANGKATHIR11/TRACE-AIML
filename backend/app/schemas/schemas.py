@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, EmailStr, Field
+from typing import Annotated, Any, Dict, List, Optional
+from pydantic import AfterValidator, BaseModel, ConfigDict, EmailStr, Field
 
 from app.models.enums import (
     ApplicationCategory,
@@ -8,18 +8,15 @@ from app.models.enums import (
     DocumentType,
     FlagCategory,
     FlagSeverity,
+    OfficerDecisionType,
     UserRole,
     VerificationStatus,
 )
 
 
 # --- Auth & User Schemas ---
-class UserCreate(BaseModel):
-    email: EmailStr
-    full_name: str
-    password: str = Field(min_length=6)
-    role: UserRole = UserRole.APPLICANT
-    institution_id: Optional[int] = None
+# A syntactically valid address, trimmed and lower-cased (accounts are matched case-insensitively).
+NormalizedEmail = Annotated[EmailStr, AfterValidator(str.lower)]
 
 
 class UserRead(BaseModel):
@@ -29,13 +26,42 @@ class UserRead(BaseModel):
     role: UserRole
     institution_id: Optional[int]
     is_active: bool
+    must_change_password: bool
     created_at: datetime
 
 
-class TokenResponse(BaseModel):
+class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    expires_in: int
     user: UserRead
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=1024)
+    # Policy (length, not equal to email) is enforced by security.validate_password_policy.
+    new_password: str = Field(max_length=1024)
+
+
+class AdminUserCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    email: NormalizedEmail
+    full_name: str = Field(min_length=1, max_length=200)
+    role: UserRole
+    institution_id: Optional[int] = None
+    # Policy (length, not equal to email) is enforced by security.validate_password_policy.
+    temporary_password: str = Field(max_length=1024)
+
+
+class AdminUserUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    full_name: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    role: Optional[UserRole] = None
+    institution_id: Optional[int] = None
+    is_active: Optional[bool] = None
+    reset_password: Optional[str] = Field(default=None, max_length=1024)
 
 
 # --- Institution Schemas ---
@@ -87,14 +113,23 @@ class ChecklistRuleUpdate(BaseModel):
 
 
 # --- Application Schemas ---
+class DeclaredData(BaseModel):
+    """Figures the applicant declares on the application form (spec §6.2)."""
+    model_config = ConfigDict(extra="forbid")
+
+    land_area_acres: Optional[float] = Field(default=None, ge=0, le=1000)
+    built_up_area_sqm: Optional[float] = Field(default=None, ge=0, le=1_000_000)
+    total_intake: Optional[int] = Field(default=None, ge=0, le=10_000)
+    faculty_count: Optional[int] = Field(default=None, ge=0, le=5_000)
+
+
 class ApplicationCreate(BaseModel):
-    institution_id: int
+    # institution_id is taken from the authenticated applicant, never from the body (spec §4.3).
+    model_config = ConfigDict(extra="forbid")
+
     academic_year: str = "2026-27"
     category: ApplicationCategory = ApplicationCategory.EOA
-    declared_data: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Applicant-submitted metadata (e.g., requested_intake, built_up_area_sqm, courses).",
-    )
+    declared_data: DeclaredData = Field(default_factory=DeclaredData)
 
 
 class ChecklistItemStatus(BaseModel):
@@ -106,6 +141,27 @@ class ChecklistItemStatus(BaseModel):
     uploaded: bool
     document_id: Optional[int] = None
     verification_status: Optional[VerificationStatus] = None
+
+
+class OfficerDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    decision: OfficerDecisionType
+    notes: str = Field(min_length=10, max_length=4000)
+
+
+class DecisionRead(BaseModel):
+    id: int
+    application_id: int
+    decision: OfficerDecisionType
+    notes: str
+    officer_id: int
+    decided_at: datetime
+    audit_hash: Optional[str] = None
+
+
+class OfficerDecisionResponse(DecisionRead):
+    status: ApplicationStatus
 
 
 class ApplicationDetailResponse(BaseModel):
@@ -121,6 +177,10 @@ class ApplicationDetailResponse(BaseModel):
     updated_at: datetime
     applicable_checklist: List[ChecklistItemStatus]
     historical_aicte_records: Dict[str, Any]
+    institution_name: str
+    documents: List["DocumentRead"]
+    decisions: List[DecisionRead]
+    latest_decision: Optional[DecisionRead] = None
 
 
 # --- Document & Flag Schemas ---
@@ -140,7 +200,6 @@ class DocumentRead(BaseModel):
     application_id: int
     document_type: DocumentType
     filename: str
-    file_path: str
     mime_type: str
     file_size_bytes: int
     sha256_hash: str
@@ -154,6 +213,31 @@ class DocumentRead(BaseModel):
     verification_status: VerificationStatus
     verification_details: Dict[str, Any] = Field(default_factory=dict)
     uploaded_at: datetime
+
+
+class RectificationSubmitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    notes: str = Field(default="", max_length=4000)
+    # Partial: only the fields the client sent are merged into the application's declared_data.
+    amended: DeclaredData = Field(default_factory=DeclaredData)
+
+
+class RectificationSubmitResponse(BaseModel):
+    application_id: int
+    status: ApplicationStatus
+    submitted_at: datetime
+    updated_fields: List[str]
+
+
+class AuthorityVerificationRead(BaseModel):
+    document_id: int
+    document_type: DocumentType
+    authority_name: Optional[str] = None
+    status: VerificationStatus
+    checked_at: Optional[datetime] = None
+    reference_id: Optional[str] = None
+    details: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ValidationFlagRead(BaseModel):
@@ -173,3 +257,5 @@ class ValidationFlagRead(BaseModel):
     reviewer_notes: Optional[str] = None
     created_at: datetime
 
+
+ApplicationDetailResponse.model_rebuild()

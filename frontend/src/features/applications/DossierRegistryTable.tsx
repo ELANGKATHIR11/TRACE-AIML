@@ -22,7 +22,7 @@ export function DossierRegistryTable({
   detailRoutePrefix = '/applications',
   title = 'Dossier Registry',
 }: {
-  institutionIdFilter?: number | string;
+  institutionIdFilter?: number;
   detailRoutePrefix?: '/applications' | '/applicant/applications';
   title?: string;
 }) {

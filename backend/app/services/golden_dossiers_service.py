@@ -20,7 +20,7 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.models.enums import ApplicationCategory, ApplicationStatus, DocumentType, VerificationStatus
 from app.models.models import Application, ChecklistRule, Document, Institution, User
-from app.services.production_security import production_security
+from app.services.document_storage import encrypt_document
 from app.services.verification_services import verification_service
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ def _attach_pdf_to_application(
 ) -> Document:
     pdf_bytes = _build_pdf_bytes(title, lines, creator=creator, producer=producer, tamper_mod_date=tamper_mod_date)
     sha256 = hashlib.sha256(pdf_bytes).hexdigest()
-    encrypted = production_security.encrypt_file_data(pdf_bytes, associated_metadata=f"APP-{app_obj.id}")
+    encrypted = encrypt_document(pdf_bytes, app_obj.id)
 
     save_dir = settings.UPLOAD_DIR / f"app_{app_obj.id}"
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -168,6 +168,7 @@ def seed_golden_dossiers(session: Session) -> Dict[str, Any]:
         institution_id=inst.id,
         submitted_by_user_id=applicant.id,
         academic_year="2026-27",
+        status=ApplicationStatus.SUBMITTED,
         category=ApplicationCategory.EOA,
         declared_data={
             "dossier_title": "Golden Dossier A: 100% Compliant EoA Renewal",
@@ -261,6 +262,7 @@ def seed_golden_dossiers(session: Session) -> Dict[str, Any]:
         institution_id=inst.id,
         submitted_by_user_id=applicant.id,
         academic_year="2026-27",
+        status=ApplicationStatus.SUBMITTED,
         category=ApplicationCategory.NEW_INSTITUTION,
         declared_data={
             "dossier_title": "Golden Dossier B: Tampered Land Deed & State Bhulekh Discrepancy",
@@ -302,6 +304,7 @@ def seed_golden_dossiers(session: Session) -> Dict[str, Any]:
         institution_id=inst.id,
         submitted_by_user_id=applicant.id,
         academic_year="2026-27",
+        status=ApplicationStatus.SUBMITTED,
         category=ApplicationCategory.INTAKE_INCREASE,
         declared_data={
             "dossier_title": "Golden Dossier C: Ghost Faculty PAN Duplication & SFR 1:30 Deficit",
@@ -356,6 +359,7 @@ def seed_golden_dossiers(session: Session) -> Dict[str, Any]:
         institution_id=inst.id,
         submitted_by_user_id=applicant.id,
         academic_year="2026-27",
+        status=ApplicationStatus.SUBMITTED,
         category=ApplicationCategory.EOA,
         declared_data={
             "dossier_title": "Golden Dossier D: Expired Fire Safety NOC (Rectification Workflow Demo)",

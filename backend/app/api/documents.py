@@ -2,22 +2,32 @@
 Handles file ingestion, hashing, MIME validation, instant offline processing, and status tracking.
 """
 
-import hashlib
-import shutil
-from pathlib import Path
-from typing import List, Optional
+import logging
+from typing import List
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlmodel import Session, select
 
 from app.config import settings
 from app.database import get_db
 from app.models.enums import DocumentType, VerificationStatus
+from app.http import StatusConflict
 from app.models.models import Application, Document, User
 from app.schemas.schemas import DocumentRead, DocumentUploadResponse
-from app.services.audit_service import audit_service
+from app.services import workflow
+from app.services.access import load_application, load_document, require_applicant, require_staff
+from app.services.audit_service import acquire_write_lock, log_audit_event
+from app.services.document_storage import (
+    content_disposition_inline,
+    ela_on_bytes,
+    read_document_plaintext,
+    read_upload_limited,
+    store_document,
+)
 from app.services.security import get_current_user
 from app.services.verification_services import verification_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/documents", tags=["Documents"])
 
@@ -69,107 +79,173 @@ def parse_document_type(raw: str) -> DocumentType:
     )
 
 
+async def _ingest_document(
+    db: Session,
+    application: Application,
+    doc_type: DocumentType,
+    file: UploadFile,
+    current_user: User,
+) -> Document:
+    """Validate, encrypt and store the upload, then stage (flush) its Document row.
+
+    The caller supersedes any replaced row and commits via `log_audit_event`.
+    """
+    contents = await read_upload_limited(file, settings.MAX_UPLOAD_MB * 2**20)
+
+    # Magic-byte/polyglot sanitisation (422 on failure), AES-256-GCM encryption and write to disk
+    target_path, sanitized_meta = store_document(
+        application.id, doc_type, contents, file.filename or "doc.pdf"
+    )
+    sha256 = sanitized_meta["sha256_digest"]
+
+    # Check for duplicate cross-application document recycling (Ghost Document detection)
+    duplicate_doc = db.exec(
+        select(Document).where(Document.sha256_hash == sha256).where(Document.application_id != application.id)
+    ).first()
+    if duplicate_doc:
+        log_audit_event(
+            db,
+            action_type="DUPLICATE_DOCUMENT_FLAGGED",
+            entity_type="Document",
+            entity_id=str(duplicate_doc.id),
+            summary=f"Security Alert: Document {file.filename} is identical to document in Application #{duplicate_doc.application_id}",
+            actor=current_user,
+            application_id=application.id,
+            details={"duplicate_of_app": duplicate_doc.application_id, "sha256": sha256},
+        )
+
+    doc = Document(
+        application_id=application.id,
+        document_type=doc_type,
+        filename=file.filename or target_path.name,
+        file_path=str(target_path),
+        mime_type=sanitized_meta["detected_mime"],
+        file_size_bytes=sanitized_meta["size_bytes"],
+        sha256_hash=sha256,
+        verification_status=VerificationStatus.PENDING,
+    )
+    db.add(doc)
+    db.flush()  # assigns doc.id
+    return doc
+
+
+def _upload_response(doc: Document, message: str) -> DocumentUploadResponse:
+    return DocumentUploadResponse(
+        id=doc.id,
+        document_id=doc.id,
+        application_id=doc.application_id,
+        filename=doc.filename,
+        document_type=doc.document_type,
+        sha256_hash=doc.sha256_hash,
+        verification_status=doc.verification_status,
+        message=message,
+    )
+
+
 @router.post("/upload", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_document(
     application_id: int = Form(...),
     document_type: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_applicant),
 ):
-    """Upload a supporting document, calculate SHA-256 for duplicate detection, and store safely."""
+    """Upload a supporting document.
+
+    DRAFT: any type; a re-upload supersedes the current one of its type. RECTIFICATION_REQUESTED:
+    only a type with no current document (an existing one is replaced through rectify).
+    """
+    application = load_application(db, application_id, current_user, write=True)
     doc_type_enum = parse_document_type(document_type)
+    workflow.ensure_uploadable(db, application, doc_type_enum)
 
-    # Verify application exists
-    app_obj = db.get(Application, application_id)
-    if not app_obj:
-        raise HTTPException(status_code=404, detail="Application not found")
+    doc = await _ingest_document(db, application, doc_type_enum, file, current_user)
 
-    # Read bytes
-    contents = await file.read()
-    
-    # 1. Production Magic-Byte and Polyglot Payload Sanitization
-    from app.services.production_security import production_security
-    sanitized_meta = production_security.sanitize_uploaded_document(contents, file.filename or "doc.pdf")
-    sha256 = sanitized_meta["sha256_digest"]
-    file_size = sanitized_meta["size_bytes"]
+    # Under the write lock, re-check the status and supersede same-type documents; the flush above
+    # and these changes commit together with the audit entry below.
+    acquire_write_lock(db)
+    db.refresh(application)
+    workflow.ensure_uploadable(db, application, doc_type_enum, new_document_id=doc.id)
+    replaced = [
+        d for d in workflow.current_documents(db, application_id)
+        if d.document_type == doc_type_enum and d.id != doc.id
+    ]
+    for old in replaced:
+        old.superseded_by_id = doc.id
+        db.add(old)
 
-    # 2. Check for duplicate cross-application document recycling (Ghost Document detection)
-    duplicate_doc = db.exec(
-        select(Document).where(Document.sha256_hash == sha256).where(Document.application_id != application_id)
-    ).first()
-    if duplicate_doc:
-        audit_service.log_action(
-            db,
-            action_type="DUPLICATE_DOCUMENT_FLAGGED",
-            entity_type="Document",
-            entity_id=str(duplicate_doc.id),
-            summary=f"Security Alert: Document {file.filename} is identical to document in Application #{duplicate_doc.application_id}",
-            actor_user_id=current_user.id,
-            application_id=application_id,
-            details={"duplicate_of_app": duplicate_doc.application_id, "sha256": sha256},
-        )
-
-    # 3. Encrypt data at rest using AES-256-GCM before saving to disk
-    encrypted_bytes = production_security.encrypt_file_data(contents, associated_metadata=f"APP-{application_id}")
-
-    # Save to disk
-    save_dir = settings.UPLOAD_DIR / f"app_{application_id}"
-    save_dir.mkdir(parents=True, exist_ok=True)
-    safe_filename = f"{doc_type_enum.value.lower()}_{sha256[:10]}_{sanitized_meta['sanitized_filename']}"
-    target_path = save_dir / safe_filename
-
-    with open(target_path, "wb") as f:
-        f.write(encrypted_bytes)
-
-    # Persist Document entity
-    doc = Document(
-        application_id=application_id,
-        document_type=doc_type_enum,
-        filename=file.filename or safe_filename,
-        file_path=str(target_path),
-        mime_type=sanitized_meta["detected_mime"],
-        file_size_bytes=file_size,
-        sha256_hash=sha256,
-        verification_status=VerificationStatus.PENDING,
-    )
-    db.add(doc)
-    db.commit()
-    db.refresh(doc)
-
-    audit_service.log_action(
+    log_audit_event(
         db,
         action_type="DOCUMENT_UPLOADED",
         entity_type="Document",
         entity_id=str(doc.id),
-        summary=f"Uploaded {file.filename} for Application #{application_id} (SHA-256: {sha256[:12]}...)",
-        actor_user_id=current_user.id,
+        summary=f"Uploaded {file.filename} for Application #{application_id} (SHA-256: {doc.sha256_hash[:12]}...)",
+        actor=current_user,
         application_id=application_id,
-        details={"filename": file.filename, "size_bytes": file_size, "sha256": sha256},
+        details={
+            "filename": file.filename,
+            "size_bytes": doc.file_size_bytes,
+            "sha256": doc.sha256_hash,
+            "superseded_document_ids": [d.id for d in replaced],
+        },
     )
+    db.refresh(doc)
+    return _upload_response(doc, "Document uploaded successfully. Ready for verification.")
 
-    return DocumentUploadResponse(
-        id=doc.id,
-        document_id=doc.id,
-        application_id=application_id,
-        filename=doc.filename,
-        document_type=doc.document_type,
-        sha256_hash=sha256,
-        verification_status=doc.verification_status,
-        message="Document uploaded successfully. Ready for verification.",
+
+@router.post(
+    "/{document_id}/rectify", response_model=DocumentUploadResponse, status_code=status.HTTP_201_CREATED
+)
+async def rectify_document(
+    document_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_applicant),
+):
+    """Replace a document while rectification is requested; the old row is kept as superseded."""
+    old = load_document(db, document_id, current_user, write=True)
+    application = db.get(Application, old.application_id)
+    workflow.ensure_status(application, workflow.RECTIFIABLE, "rectify documents of")
+    if old.superseded_by_id is not None:
+        raise StatusConflict("Document has already been replaced", application.status.value)
+
+    new = await _ingest_document(db, application, old.document_type, file, current_user)
+
+    acquire_write_lock(db)
+    db.refresh(application)
+    db.refresh(old)
+    workflow.ensure_status(application, workflow.RECTIFIABLE, "rectify documents of")
+    if old.superseded_by_id is not None:
+        raise StatusConflict("Document has already been replaced", application.status.value)
+    old.superseded_by_id = new.id
+    db.add(old)
+
+    log_audit_event(
+        db,
+        action_type="DOCUMENT_RECTIFIED",
+        entity_type="Document",
+        entity_id=str(new.id),
+        summary=f"Replaced document #{old.id} with {file.filename} for Application #{application.id}",
+        actor=current_user,
+        application_id=application.id,
+        details={
+            "superseded_document_id": old.id,
+            "document_type": new.document_type.value,
+            "sha256": new.sha256_hash,
+        },
     )
+    db.refresh(new)
+    return _upload_response(new, "Document rectified successfully. Ready for verification.")
 
 
 @router.post("/{document_id}/verify")
 def verify_single_document(
     document_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ):
     """Run 100% offline OCR, field extraction, and forensic checks on an individual document."""
-    doc = db.get(Document, document_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    doc = load_document(db, document_id, current_user)
 
     result = verification_service.process_document(db, doc)
     return {
@@ -184,40 +260,44 @@ def list_application_documents(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """List all documents attached to an application."""
-    docs = db.exec(select(Document).where(Document.application_id == application_id)).all()
-    return docs
+    """List the application's current (not superseded) documents."""
+    load_application(db, application_id, current_user)
+    return workflow.current_documents(db, application_id)
+
+
+@router.get("/{document_id}", response_model=DocumentRead)
+def get_document(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Document metadata (never the server-side storage path)."""
+    return load_document(db, document_id, current_user)
 
 
 @router.get("/{document_id}/preview")
 def get_document_preview(
     document_id: int,
-    page: int = 1,
-    mark: Optional[List[str]] = None,
     db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    """
-    Return forensic document preview with optional vector bounding box highlights.
-    """
-    from fastapi.responses import FileResponse, JSONResponse
-    doc = db.get(Document, document_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    file_p = Path(doc.file_path)
-    if file_p.exists():
-        # Check if decrypt is needed or return file directly
-        return FileResponse(file_p, media_type=doc.mime_type, filename=doc.filename)
-
-    return JSONResponse(
-        content={
-            "document_id": document_id,
-            "filename": doc.filename,
-            "page": page,
-            "status": "PREVIEW_READY",
-            "bounding_boxes": [],
-            "matches": mark or [],
-        }
+    """Return the decrypted document inline."""
+    doc = load_document(db, document_id, current_user)
+    try:
+        plaintext = read_document_plaintext(doc)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Document file not found")
+    except ValueError:
+        logger.error("Document %s failed decryption", doc.id)
+        raise HTTPException(status_code=500, detail="Stored document could not be read")
+    return Response(
+        content=plaintext,
+        media_type=doc.mime_type,
+        headers={
+            "Content-Disposition": content_disposition_inline(doc.filename),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -225,39 +305,41 @@ def get_document_preview(
 def get_document_ela(
     document_id: int,
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_staff),
 ):
-    """
-    Execute Error Level Analysis (ELA) to detect JPEG resave splices, cloned seals, and tampered digits.
-    """
-    doc = db.get(Document, document_id)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+    """Execute Error Level Analysis (ELA) on the decrypted image to detect resave splices and tampering."""
+    doc = load_document(db, document_id, current_user)
 
-    from app.services.image_forensics_service import ImageForensicsService
-    file_p = Path(doc.file_path)
+    if doc.mime_type not in ("image/png", "image/jpeg"):
+        return {
+            "document_id": document_id,
+            "tampering_detected": False,
+            "anomaly_score": 0.0,
+            "details": "Document is not a raster PNG/JPEG image. ELA does not apply.",
+        }
 
-    if file_p.exists() and file_p.suffix.lower() in [".jpg", ".jpeg", ".png"]:
-        try:
-            ela_res = ImageForensicsService.perform_error_level_analysis(file_p)
-            return {
-                "document_id": document_id,
-                "tampering_detected": ela_res.get("tamper_anomaly_detected", False),
-                "anomaly_score": ela_res.get("tamper_anomaly_score", 0.0),
-                "details": "Error Level Analysis computed across DCT blocks.",
-                "max_difference": ela_res.get("max_error", 0.0),
-            }
-        except Exception as e:
-            return {
-                "document_id": document_id,
-                "tampering_detected": False,
-                "anomaly_score": 0.0,
-                "details": f"ELA processing: {str(e)}",
-            }
+    try:
+        plaintext = read_document_plaintext(doc)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Document file not found")
+    except ValueError:
+        logger.error("Document %s failed decryption", doc.id)
+        raise HTTPException(status_code=500, detail="Stored document could not be read")
 
+    try:
+        ela_res = ela_on_bytes(plaintext, doc.mime_type)
+    except Exception:
+        logger.exception("ELA failed for document %s", doc.id)
+        return {
+            "document_id": document_id,
+            "tampering_detected": False,
+            "anomaly_score": 0.0,
+            "details": "Error Level Analysis could not be computed for this image.",
+        }
     return {
         "document_id": document_id,
-        "tampering_detected": False,
-        "anomaly_score": 0.0,
-        "details": "Document is PDF or not a raster JPEG image. ELA standard baseline passed.",
+        "tampering_detected": ela_res.get("tamper_detected_by_ela", False),
+        "anomaly_score": ela_res.get("std_compression_error", 0.0),
+        "details": ela_res.get("reason", "Error Level Analysis computed across DCT blocks."),
+        "max_difference": ela_res.get("max_compression_error", 0.0),
     }
-

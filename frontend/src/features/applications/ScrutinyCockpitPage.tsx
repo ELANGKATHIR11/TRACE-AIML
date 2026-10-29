@@ -14,11 +14,9 @@ import {
   Scale,
 } from 'lucide-react';
 import {
-  AuthorityIdentifier,
   ComplianceFlag,
   MetricComparisonRow,
   OfficerDecisionType,
-  PersonaRole,
 } from '../../types/api';
 import { invalidateAllAppQueries } from '../../lib/api/cacheSync';
 import {
@@ -27,11 +25,14 @@ import {
   fetchAuthorityVerifications,
   submitOfficerDecision,
   triggerAgentReview,
+  validateApplication,
 } from '../../lib/api/endpoints';
 import {
   OfficerDecisionFormSchema,
   OfficerDecisionFormValues,
 } from '../../lib/schemas/apiSchemas';
+import { canDecide, canValidate } from '../../lib/permissions/roles';
+import { ApiClientError } from '../../lib/api/transport';
 import {
   formatApiTimestamp,
   formatApiValue,
@@ -46,21 +47,20 @@ import {
 } from '../../components/ApiStateFeedback';
 import { StatutoryBanner } from '../../components/StatutoryBanner';
 import { DossierStack3D, Tactile3DCard } from '../../components/Tactile3DElements';
-import { RequireRole } from '../identity/IdentityContext';
+import { useAuth } from '../auth/AuthContext';
 import { EvidenceCanvasViewer } from '../documents/EvidenceCanvasViewer';
+import { verificationDetail } from './verificationDisplay';
 
-const REQUESTED_AUTHORITIES: AuthorityIdentifier[] = [
-  AuthorityIdentifier.STATE_BHULEKH,
-  AuthorityIdentifier.FIRE_PORTAL,
-  AuthorityIdentifier.DIGILOCKER_ESTAMP,
-  AuthorityIdentifier.AICTE_NBA_PORTAL,
-  AuthorityIdentifier.FACULTY_REGISTRY,
-];
+// Statuses from which POST /validate is accepted (spec §6.1).
+const VALIDATABLE_STATUSES: string[] = ['SUBMITTED', 'READY_FOR_REVIEW', 'DEFICIENCY_FLAGGED'];
 
 export function ScrutinyCockpitPage() {
   const { id } = useParams<{ id: string }>();
   const applicationId = id ?? '';
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const mayValidate = user !== null && canValidate(user.role);
+  const mayDecide = user !== null && canDecide(user.role);
 
   const [selectedDocId, setSelectedDocId] = useState<string | number | null>(null);
   const [selectedPage, setSelectedPage] = useState<number>(1);
@@ -96,6 +96,14 @@ export function ScrutinyCockpitPage() {
     },
   });
 
+  const validateMutation = useMutation({
+    mutationFn: () => validateApplication(applicationId),
+    retry: false,
+    onSuccess: () => {
+      invalidateAllAppQueries(queryClient, { applicationId, reason: 'VALIDATION_COMPLETED' });
+    },
+  });
+
   const {
     register,
     handleSubmit,
@@ -105,17 +113,15 @@ export function ScrutinyCockpitPage() {
     resolver: zodResolver(OfficerDecisionFormSchema),
     defaultValues: {
       decision: OfficerDecisionType.APPROVE,
-      officer_notes: '',
-      confirm_advisory_acknowledgement: undefined,
+      notes: '',
     },
   });
 
   const decisionMutation = useMutation({
     mutationFn: (values: OfficerDecisionFormValues) =>
       submitOfficerDecision(applicationId, {
-        decision: values.decision,
-        officer_notes: values.officer_notes,
-        notes: values.officer_notes,
+        decision: values.decision as OfficerDecisionType,
+        notes: values.notes,
       }),
     retry: false, // Binding statutory decisions are never auto-retried
     onSuccess: () => {
@@ -128,6 +134,14 @@ export function ScrutinyCockpitPage() {
   const documents = appDetail?.documents ?? [];
   const flags = flagsQuery.data ?? appDetail?.flags ?? [];
   const agentReviewResult = agentReviewMutation.data ?? appDetail?.agent_review ?? null;
+  // 503 means the local AI model is down: an unavailable capability, not a failed request.
+  const agentReviewUnavailable =
+    agentReviewMutation.error instanceof ApiClientError && agentReviewMutation.error.status === 503
+      ? agentReviewMutation.error
+      : null;
+  const verificationRows =
+    verificationsQuery.data ??
+    (Array.isArray(appDetail?.authority_verifications) ? appDetail.authority_verifications : []);
 
   // Build Metric Comparison rows strictly from backend-returned data (never invent baseline figures)
   const metricRows: MetricComparisonRow[] = React.useMemo(() => {
@@ -203,7 +217,7 @@ export function ScrutinyCockpitPage() {
   };
 
   return (
-    <RequireRole allowedRoles={[PersonaRole.OFFICIAL, PersonaRole.REVIEWER]}>
+    <>
       <div className="space-y-5 animate-dossier-settle">
         {/* Breadcrumb & Dossier Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#CBD5E1] pb-4">
@@ -229,6 +243,23 @@ export function ScrutinyCockpitPage() {
 
           <div className="flex items-center gap-2.5">
             {appDetail && <StatusIndicator value={appDetail.status} />}
+            {mayValidate && appDetail && VALIDATABLE_STATUSES.includes(appDetail.status ?? '') && (
+              <button
+                type="button"
+                onClick={() => validateMutation.mutate()}
+                disabled={validateMutation.isPending}
+                className="btn-tactile-3d inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-[#1B365D] border border-[#1B365D] hover:bg-[#0F1E36] whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+              >
+                <span>
+                  {validateMutation.isPending ? 'Validating...' : 'Run Statutory Validation'}
+                </span>
+              </button>
+            )}
+            {validateMutation.isError && (
+              <span role="alert" className="text-xs text-red-700">
+                Validation failed: {validateMutation.error.message}
+              </span>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -479,50 +510,46 @@ export function ScrutinyCockpitPage() {
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-[#F4F6F9] border-b border-[#CBD5E1] text-[#0F1E36]">
-                      <th className="py-2 px-2.5 font-semibold">Authority Identifier</th>
+                      <th className="py-2 px-2.5 font-semibold">Issuing Authority / Document</th>
                       <th className="py-2 px-2.5 font-semibold">Backend Status</th>
                       <th className="py-2 px-2.5 font-semibold">Provenance / Details</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#E2E8F0]">
-                    {REQUESTED_AUTHORITIES.map((authId) => {
-                      const list =
-                        verificationsQuery.data ??
-                        (Array.isArray(appDetail?.authority_verifications)
-                          ? appDetail.authority_verifications
-                          : []);
-                      const matched = list.find((item) => item.authority_id === authId);
-                      const mapVal =
-                        !Array.isArray(appDetail?.authority_verifications) &&
-                        appDetail?.authority_verifications &&
-                        typeof appDetail.authority_verifications === 'object'
-                          ? (appDetail.authority_verifications as Record<string, unknown>)[authId]
-                          : undefined;
-
-                      const status =
-                        matched?.status ??
-                        (typeof mapVal === 'string' ? mapVal : 'SOURCE_UNAVAILABLE');
-                      const details =
-                        matched?.details ??
-                        matched?.provenance ??
-                        (matched
-                          ? matched.verified_at
-                          : 'No active verification record returned by backend');
-
-                      return (
-                        <tr key={authId}>
-                          <td className="py-2 px-2.5 font-mono font-semibold text-[#0F1E36]">
-                            {authId}
-                          </td>
-                          <td className="py-2 px-2.5">
-                            <StatusIndicator value={status} />
-                          </td>
-                          <td className="py-2 px-2.5 text-[#475569]">
-                            {formatApiValue(details)}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {verificationRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={3} className="py-2 px-2.5 text-[#475569]">
+                          {verificationsQuery.isError
+                            ? 'Verification records could not be retrieved from the backend.'
+                            : 'No active verification record returned by backend'}
+                        </td>
+                      </tr>
+                    ) : (
+                      verificationRows.map((row, idx) => {
+                        const details = verificationDetail(row);
+                        return (
+                          <tr key={String(row.document_id ?? `row-${idx}`)}>
+                            <td className="py-2 px-2.5 font-mono font-semibold text-[#0F1E36]">
+                              {formatApiValue(row.authority_name ?? row.authority_id ?? row.document_type)}
+                              {row.document_type && (
+                                <div className="font-normal text-[#475569]">
+                                  {row.document_type}
+                                  {row.document_id !== undefined && row.document_id !== null
+                                    ? ` · Doc #${String(row.document_id)}`
+                                    : ''}
+                                </div>
+                              )}
+                            </td>
+                            <td className="py-2 px-2.5">
+                              <StatusIndicator value={row.status} />
+                            </td>
+                            <td className="py-2 px-2.5 text-[#475569]">
+                              {formatApiValue(details)}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -560,12 +587,20 @@ export function ScrutinyCockpitPage() {
                 . Stages and technologies are displayed strictly when confirmed by the backend response.
               </p>
 
-              {agentReviewMutation.isError && (
-                <ApiErrorState
-                  title="AI Advisory Review Execution Failed"
-                  error={agentReviewMutation.error}
+              {agentReviewUnavailable ? (
+                <ApiUnavailableState
+                  capability="AI Advisory Review"
                   endpoint={`POST /api/applications/${applicationId}/agent-review`}
+                  reason={`${agentReviewUnavailable.detail}. The local AI model is not reachable; no simulated review is shown. Retry once the model service is running.`}
                 />
+              ) : (
+                agentReviewMutation.isError && (
+                  <ApiErrorState
+                    title="AI Advisory Review Execution Failed"
+                    error={agentReviewMutation.error}
+                    endpoint={`POST /api/applications/${applicationId}/agent-review`}
+                  />
+                )
               )}
 
               {agentReviewResult ? (
@@ -603,7 +638,7 @@ export function ScrutinyCockpitPage() {
                     </div>
                   ))}
                 </div>
-              ) : (
+              ) : agentReviewUnavailable ? null : (
                 <ApiUnavailableState
                   capability="AI Advisory Execution Result"
                   endpoint={`POST /api/applications/${applicationId}/agent-review`}
@@ -631,119 +666,108 @@ export function ScrutinyCockpitPage() {
 
               <StatutoryBanner compact />
 
-              <form
-                onSubmit={handleSubmit((vals) => decisionMutation.mutate(vals))}
-                noValidate
-                className="space-y-4"
-              >
-                <div>
-                  <label
-                    htmlFor="officer-decision-select"
-                    className="block text-xs font-semibold text-[#0F1E36] mb-1"
-                  >
-                    Binding Statutory Determination *
-                  </label>
-                  <select
-                    id="officer-decision-select"
-                    {...register('decision')}
-                    className="w-full px-3 py-2 text-xs font-semibold bg-[#F4F6F9] border border-[#CBD5E1] text-[#0F1E36]"
-                  >
-                    <option value={OfficerDecisionType.APPROVE}>
-                      APPROVE — Grant Statutory Approval
-                    </option>
-                    <option value={OfficerDecisionType.REQUEST_CORRECTION}>
-                      REQUEST_CORRECTION — Issue Deficiency Notice for Rectification
-                    </option>
-                    <option value={OfficerDecisionType.ESCALATE}>
-                      ESCALATE — Refer to Standing Hearing / Physical Inspection Committee
-                    </option>
-                  </select>
-                  {decisionErrors.decision && (
-                    <p role="alert" className="mt-1 text-xs text-[#B91C1C] font-medium">
-                      {decisionErrors.decision.message}
-                    </p>
-                  )}
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="officer-notes-textarea"
-                    className="block text-xs font-semibold text-[#0F1E36] mb-1"
-                  >
-                    Reasoned Scrutiny & Adjudication Notes *
-                  </label>
-                  <textarea
-                    id="officer-notes-textarea"
-                    rows={3}
-                    placeholder="Record reasoned statutory observations, documentary references, and grounds for determination..."
-                    {...register('officer_notes')}
-                    className="w-full px-3 py-2 text-xs bg-[#F4F6F9] border border-[#CBD5E1] text-[#0F1E36]"
-                  />
-                  {decisionErrors.officer_notes && (
-                    <p role="alert" className="mt-1 text-xs text-[#B91C1C] font-medium">
-                      {decisionErrors.officer_notes.message}
-                    </p>
-                  )}
-                </div>
-
-                <div className="p-3 bg-[#F4F6F9] border border-[#CBD5E1]">
-                  <label className="flex items-start gap-2.5 text-xs text-[#0F1E36] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      {...register('confirm_advisory_acknowledgement')}
-                      className="mt-0.5"
-                    />
-                    <span>
-                      I confirm that all AI inferences and compliance flags were evaluated strictly as
-                      advisory signals, and I authorize recording this binding statutory determination.
-                    </span>
-                  </label>
-                  {decisionErrors.confirm_advisory_acknowledgement && (
-                    <p role="alert" className="mt-1.5 text-xs text-[#B91C1C] font-medium">
-                      {decisionErrors.confirm_advisory_acknowledgement.message}
-                    </p>
-                  )}
-                </div>
-
-                {decisionMutation.isError && (
-                  <ApiErrorState
-                    title="Officer Adjudication Submission Failed"
-                    error={decisionMutation.error}
-                    endpoint={`POST /api/applications/${applicationId}/decision`}
-                  />
-                )}
-
-                {decisionMutation.isSuccess && decisionMutation.data && (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    className="border border-[#86EFAC] bg-[#F0FDF4] p-3.5 text-xs text-[#14532D] space-y-1"
-                  >
-                    <div className="flex items-center gap-1.5 font-semibold">
-                      <CheckCircle2 className="w-4 h-4 text-[#15803D]" aria-hidden="true" />
-                      <span>
-                        Server Confirmed Determination: {decisionMutation.data.decision}
-                      </span>
-                    </div>
-                    <div className="font-mono">
-                      Timestamp: {formatApiTimestamp(decisionMutation.data.decided_at ?? decisionMutation.data.timestamp)} · Audit Hash:{' '}
-                      {formatApiValue(decisionMutation.data.audit_hash)}
-                    </div>
+              {!mayDecide ? (
+                <ApiUnavailableState
+                  capability="Binding Statutory Determination"
+                  endpoint={`POST /api/applications/${applicationId}/decision`}
+                  reason="Only scrutiny reviewers record binding decisions. Your role can review this dossier but not adjudicate it."
+                />
+              ) : (
+                <form
+                  onSubmit={handleSubmit((vals) => decisionMutation.mutate(vals))}
+                  noValidate
+                  className="space-y-4"
+                >
+                  <div>
+                    <label
+                      htmlFor="officer-decision-select"
+                      className="block text-xs font-semibold text-[#0F1E36] mb-1"
+                    >
+                      Binding Statutory Determination *
+                    </label>
+                    <select
+                      id="officer-decision-select"
+                      {...register('decision')}
+                      className="w-full px-3 py-2 text-xs font-semibold bg-[#F4F6F9] border border-[#CBD5E1] text-[#0F1E36]"
+                    >
+                      <option value={OfficerDecisionType.APPROVE}>
+                        APPROVE — Grant Statutory Approval
+                      </option>
+                      <option value={OfficerDecisionType.REQUEST_RECTIFICATION}>
+                        REQUEST_RECTIFICATION — Issue Deficiency Notice for Rectification
+                      </option>
+                      <option value={OfficerDecisionType.REJECT}>
+                        REJECT — Refuse Statutory Approval
+                      </option>
+                    </select>
+                    {decisionErrors.decision && (
+                      <p role="alert" className="mt-1 text-xs text-[#B91C1C] font-medium">
+                        {decisionErrors.decision.message}
+                      </p>
+                    )}
                   </div>
-                )}
 
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={decisionMutation.isPending}
-                    className="px-4 py-2 text-xs font-semibold text-white bg-[#C2410C] hover:bg-[#9A3412] disabled:opacity-60 whitespace-nowrap shrink-0 cursor-pointer"
-                  >
-                    {decisionMutation.isPending
-                      ? 'Recording Decision on Backend...'
-                      : 'Record Binding Statutory Decision'}
-                  </button>
-                </div>
-              </form>
+                  <div>
+                    <label
+                      htmlFor="officer-notes-textarea"
+                      className="block text-xs font-semibold text-[#0F1E36] mb-1"
+                    >
+                      Reasoned Scrutiny & Adjudication Notes *
+                    </label>
+                    <textarea
+                      id="officer-notes-textarea"
+                      rows={3}
+                      placeholder="Record reasoned statutory observations, documentary references, and grounds for determination..."
+                      {...register('notes')}
+                      className="w-full px-3 py-2 text-xs bg-[#F4F6F9] border border-[#CBD5E1] text-[#0F1E36]"
+                    />
+                    {decisionErrors.notes && (
+                      <p role="alert" className="mt-1 text-xs text-[#B91C1C] font-medium">
+                        {decisionErrors.notes.message}
+                      </p>
+                    )}
+                  </div>
+
+                  {decisionMutation.isError && (
+                    <ApiErrorState
+                      title="Officer Adjudication Submission Failed"
+                      error={decisionMutation.error}
+                      endpoint={`POST /api/applications/${applicationId}/decision`}
+                    />
+                  )}
+
+                  {decisionMutation.isSuccess && decisionMutation.data && (
+                    <div
+                      role="status"
+                      aria-live="polite"
+                      className="border border-[#86EFAC] bg-[#F0FDF4] p-3.5 text-xs text-[#14532D] space-y-1"
+                    >
+                      <div className="flex items-center gap-1.5 font-semibold">
+                        <CheckCircle2 className="w-4 h-4 text-[#15803D]" aria-hidden="true" />
+                        <span>
+                          Server Confirmed Determination: {decisionMutation.data.decision}
+                        </span>
+                      </div>
+                      <div className="font-mono">
+                        Timestamp: {formatApiTimestamp(decisionMutation.data.decided_at ?? decisionMutation.data.timestamp)} · Audit Hash:{' '}
+                        {formatApiValue(decisionMutation.data.audit_hash)}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={decisionMutation.isPending}
+                      className="px-4 py-2 text-xs font-semibold text-white bg-[#C2410C] hover:bg-[#9A3412] disabled:opacity-60 whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      {decisionMutation.isPending
+                        ? 'Recording Decision on Backend...'
+                        : 'Record Binding Statutory Decision'}
+                    </button>
+                  </div>
+                </form>
+              )}
             </section>
           </div>
 
@@ -761,6 +785,6 @@ export function ScrutinyCockpitPage() {
           </div>
         </div>
       </div>
-    </RequireRole>
+    </>
   );
 }

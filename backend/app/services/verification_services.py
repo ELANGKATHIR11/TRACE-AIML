@@ -7,16 +7,17 @@ Combines:
 100% Offline, no external APIs.
 """
 
-import hashlib
 import logging
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
-from sqlmodel import Session, select
+from sqlalchemy import delete as sa_delete
+from sqlmodel import Session, col, select
 
 from app.models.enums import ApplicationStatus, FlagCategory, FlagSeverity, VerificationStatus
-from app.models.models import Application, ChecklistRule, Document, ValidationFlag
-from app.services.audit_service import audit_service
+from app.models.models import Application, Document, ValidationFlag, utc_now
+from app.services import workflow
+from app.services.audit_service import log_audit_event
+from app.services.document_storage import ela_on_bytes, read_document_plaintext
 from app.services.AI_service import gemini_service
 from app.services.ocr_service import ocr_service
 from app.services.rules_engine import rules_engine
@@ -27,16 +28,18 @@ logger = logging.getLogger(__name__)
 class VerificationService:
     def process_document(self, db: Session, document: Document) -> Dict[str, Any]:
         """Execute full parsing, OCR, field extraction, and forensics on an uploaded document."""
-        file_path = Path(document.file_path)
-        if not file_path.exists():
-            document.verification_status = VerificationStatus.REJECTED
-            document.verification_details = {"error": f"File not found on server: {document.file_path}"}
+        try:
+            plaintext = read_document_plaintext(document)
+        except (FileNotFoundError, ValueError) as exc:
+            logger.warning("Document %s unreadable: %s", document.id, type(exc).__name__)
+            document.verification_status = VerificationStatus.MANUAL_REVIEW_REQUIRED
+            document.verification_details = {"error": "Stored document is missing or unreadable"}
             db.add(document)
             db.commit()
             return {"error": "File missing"}
 
-        # 1. OCR & Structural Extraction (with transparent decryption if encrypted)
-        ocr_result = ocr_service.extract_document(file_path, app_id=document.application_id)
+        # 1. OCR & Structural Extraction (decrypted in memory)
+        ocr_result = ocr_service.extract_document_bytes(plaintext, document.filename)
         document.raw_ocr_text = ocr_result.get("full_text", "")
         document.pdf_metadata = ocr_result.get("metadata", {})
 
@@ -59,10 +62,9 @@ class VerificationService:
         )
 
         # 3b. Advanced Image Forensics (Error Level Analysis for images)
-        if file_path.suffix.lower() in [".png", ".jpg", ".jpeg"]:
+        if document.mime_type in ("image/png", "image/jpeg"):
             try:
-                from app.services.image_forensics_service import image_forensics
-                ela_res = image_forensics.perform_error_level_analysis(file_path)
+                ela_res = ela_on_bytes(plaintext, document.mime_type)
                 forensics["ela_analysis"] = ela_res
                 if ela_res.get("tamper_detected_by_ela"):
                     forensics["is_tampering_suspected"] = True
@@ -73,6 +75,7 @@ class VerificationService:
                 logger.warning(f"ELA analysis skipped: {e}")
 
         document.verification_details = {
+            "checked_at": utc_now().isoformat(),
             "forensics": forensics,
             "page_count": ocr_result.get("total_pages", 1),
             "fonts": ocr_result.get("fonts", []),
@@ -102,7 +105,7 @@ class VerificationService:
         app_obj = db.get(Application, document.application_id)
         declared_data = app_obj.declared_data if app_obj else {}
 
-        active_rules = db.exec(select(ChecklistRule).where(ChecklistRule.is_active == True)).all()
+        active_rules = workflow.category_rules(db, app_obj) if app_obj else []
         rule_flags = rules_engine.evaluate_document_rules(document, active_rules, declared_data)
 
         for rf in rule_flags:
@@ -129,7 +132,7 @@ class VerificationService:
         db.commit()
         db.refresh(document)
 
-        audit_service.log_action(
+        log_audit_event(
             db,
             action_type="DOCUMENT_VERIFIED",
             entity_type="Document",
@@ -152,9 +155,11 @@ class VerificationService:
         application = db.get(Application, application_id)
         if not application:
             raise ValueError(f"Application {application_id} not found")
+        # Fail before the (slow) OCR/extraction work; the transition below re-checks.
+        workflow.ensure_status(application, workflow.REVIEWABLE, "validate")
 
-        documents = db.exec(select(Document).where(Document.application_id == application_id)).all()
-        active_rules = db.exec(select(ChecklistRule).where(ChecklistRule.is_active == True)).all()
+        documents = workflow.current_documents(db, application_id)
+        active_rules = workflow.category_rules(db, application)
 
         # Step A: Ensure all uploaded documents have been parsed
         for doc in documents:
@@ -162,12 +167,25 @@ class VerificationService:
                 self.process_document(db, doc)
 
         # Refresh documents after individual processing
-        documents = db.exec(select(Document).where(Document.application_id == application_id)).all()
+        documents = workflow.current_documents(db, application_id)
 
         # Step B: Run Multi-Document Regulatory Compliance
         compliance = rules_engine.evaluate_application_compliance(application, documents, active_rules)
 
-        # Record cross-document flags in DB
+        if compliance["overall_status"] == "NON_COMPLIANT_CRITICAL_DEFICITS":
+            target = ApplicationStatus.DEFICIENCY_FLAGGED
+        else:
+            target = ApplicationStatus.READY_FOR_REVIEW
+        # Takes the write lock first, so the flag replacement below cannot interleave with another
+        # validation of the same application.
+        workflow.transition(db, application, target, allowed_from=workflow.REVIEWABLE)
+
+        # Replace the previous run's cross-document (application-level) flags with this run's.
+        db.execute(
+            sa_delete(ValidationFlag)
+            .where(col(ValidationFlag.application_id) == application_id)
+            .where(col(ValidationFlag.document_id).is_(None))
+        )
         for flag_data in compliance.get("flags", []):
             flag = ValidationFlag(
                 application_id=application_id,
@@ -180,21 +198,11 @@ class VerificationService:
                 is_advisory=True,
             )
             db.add(flag)
-
-        # Update application validation summary and state
         application.validation_summary = compliance
-        if compliance["overall_status"] == "FULLY_COMPLIANT":
-            application.status = ApplicationStatus.READY_FOR_REVIEW
-        elif compliance["overall_status"] == "NON_COMPLIANT_CRITICAL_DEFICITS":
-            application.status = ApplicationStatus.DEFICIENCY_FLAGGED
-        else:
-            application.status = ApplicationStatus.READY_FOR_REVIEW
-
         db.add(application)
-        db.commit()
-        db.refresh(application)
 
-        audit_service.log_action(
+        # Commits the flags, summary and status change together with the audit entry.
+        log_audit_event(
             db,
             action_type="APPLICATION_VALIDATION_COMPLETED",
             entity_type="Application",
@@ -204,24 +212,11 @@ class VerificationService:
             details=compliance,
         )
 
-        # Automatically generate default Visual AI Forensic Audit Report with highlighted screenshots
-        visual_report_path = None
-        visual_report_markdown = None
-        try:
-            from generate_visual_ai_report import build_detailed_visual_ai_report
-            visual_report_path = str(build_detailed_visual_ai_report(application.id))
-            if Path(visual_report_path).exists():
-                visual_report_markdown = Path(visual_report_path).read_text(encoding="utf-8")
-        except Exception as e:
-            logger.warning(f"Could not auto-generate visual AI report: {e}")
-
         return {
             "application_id": application.id,
             "application_number": application.application_number,
             "status": application.status.value,
             "compliance": compliance,
-            "default_ai_report_path": visual_report_path,
-            "default_ai_report_markdown": visual_report_markdown,
         }
 
 

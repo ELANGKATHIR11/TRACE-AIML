@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+import sqlalchemy as sa
 from sqlalchemy import Column, JSON
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -9,6 +10,7 @@ from app.models.enums import (
     DocumentType,
     FlagCategory,
     FlagSeverity,
+    OfficerDecisionType,
     UserRole,
     VerificationStatus,
 )
@@ -29,7 +31,25 @@ class User(SQLModel, table=True):
     role: UserRole = Field(default=UserRole.APPLICANT, index=True)
     institution_id: Optional[int] = Field(default=None, foreign_key="institutions.id")
     is_active: bool = Field(default=True)
+    token_version: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    failed_login_count: int = Field(default=0, sa_column_kwargs={"server_default": "0"})
+    locked_until: Optional[datetime] = Field(default=None)
+    must_change_password: bool = Field(default=False, sa_column_kwargs={"server_default": sa.false()})
     created_at: datetime = Field(default_factory=utc_now)
+
+
+class RefreshToken(SQLModel, table=True):
+    """Rotating refresh token; only the SHA-256 hash of the raw token is stored."""
+    __tablename__ = "refresh_tokens"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    family_id: str = Field(index=True)
+    token_hash: str = Field(unique=True)
+    issued_at: datetime
+    expires_at: datetime
+    revoked_at: Optional[datetime] = Field(default=None)
+    replaced_by_id: Optional[int] = Field(default=None, foreign_key="refresh_tokens.id")
 
 
 class Institution(SQLModel, table=True):
@@ -143,6 +163,9 @@ class Document(SQLModel, table=True):
     verification_details: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
     uploaded_at: datetime = Field(default_factory=utc_now)
+    # Set when a newer upload of the same type replaces this one; superseded rows are kept for
+    # the audit trail but excluded from listings, checklists and verification (spec §6.2).
+    superseded_by_id: Optional[int] = Field(default=None, foreign_key="documents.id")
 
     application: Optional[Application] = Relationship(back_populates="documents")
     flags: List["ValidationFlag"] = Relationship(back_populates="document")
@@ -181,6 +204,21 @@ class ValidationFlag(SQLModel, table=True):
     document: Optional[Document] = Relationship(back_populates="flags")
 
 
+class OfficerDecision(SQLModel, table=True):
+    """A reviewer's recorded determination on an application (spec §6.3)."""
+    __tablename__ = "officer_decisions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    application_id: int = Field(foreign_key="applications.id", index=True)
+    officer_user_id: int = Field(foreign_key="users.id")
+    decision: OfficerDecisionType
+    notes: str
+    # NULL only transiently: the row is flushed together with the status change, before the
+    # audit entry that commits both, and is then linked to that entry.
+    audit_log_id: Optional[int] = Field(default=None, foreign_key="audit_logs.id")
+    created_at: datetime = Field(default_factory=utc_now)
+
+
 class AuditLog(SQLModel, table=True):
     """
     Strict, immutable log of rules applied, records checked, API responses,
@@ -198,3 +236,7 @@ class AuditLog(SQLModel, table=True):
     summary: str
     details: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     timestamp: datetime = Field(default_factory=utc_now, index=True)
+    # HMAC chain (spec §5.4): written only by audit_service.log_audit_event. record_hash is
+    # NULL only transiently, between the insert flush (which assigns `id`) and the commit.
+    prev_hash: str = Field(max_length=64)
+    record_hash: Optional[str] = Field(default=None, max_length=64)

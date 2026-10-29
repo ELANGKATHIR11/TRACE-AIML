@@ -1,16 +1,24 @@
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session
 
-from app.api import applications, audit, auth, dashboard, documents, rules
+from app.api import admin, applications, audit, auth, dashboard, documents, health, intelligence, rules
 from app.config import settings
-from app.database import init_db_and_seed
+from app.database import get_engine, seed_reference_data
+from app.http import install
+from app.models.models import User
+from app.services.access import require_staff
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db_and_seed()
+    with Session(get_engine()) as session:
+        seed_reference_data(session)
     yield
+
+
+def _docs(path: str) -> str | None:
+    return path if settings.ENABLE_API_DOCS else None
 
 
 app = FastAPI(
@@ -22,46 +30,27 @@ app = FastAPI(
         "verify regulatory compliance against the Approval Process Handbook."
     ),
     lifespan=lifespan,
+    docs_url=_docs("/docs"),
+    redoc_url=_docs("/redoc"),
+    openapi_url=_docs("/openapi.json"),
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-import os
-from pathlib import Path
-from fastapi.staticfiles import StaticFiles
-
-reports_dir = Path(__file__).resolve().parent.parent / "reports"
-reports_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/reports", StaticFiles(directory=str(reports_dir)), name="reports")
+install(app)
 
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(rules.router)
 app.include_router(applications.router)
 app.include_router(documents.router)
 app.include_router(dashboard.router)
 app.include_router(audit.router)
+app.include_router(intelligence.router)
+app.include_router(health.router)
 
 
 @app.get("/api/models", tags=["Dashboard"])
-@app.get("/models", tags=["Dashboard"])
 def get_root_model_registry(
-    db = Depends(dashboard.get_db),
-    current_user = Depends(dashboard.get_current_user),
+    db: Session = Depends(dashboard.get_db),
+    current_user: User = Depends(require_staff),
 ):
     return dashboard.get_model_registry(db, current_user)
-
-
-@app.get("/", tags=["Health"])
-async def root():
-    return {
-        "project": settings.PROJECT_NAME,
-        "project_id": settings.PROJECT_ID,
-        "status": "Backend running successfully!",
-        "docs_url": "/docs",
-    }

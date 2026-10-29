@@ -96,8 +96,8 @@ class MultiSourceIngestionService:
                 img_doc = pymupdf.open("png" if is_png else "jpeg", file_bytes)
                 pdf_b = img_doc.convert_to_pdf()
                 p_doc = pymupdf.open("pdf", pdf_b)
-                tessdata = "f:/TRACE/tesseract-main/tessdata"
-                if Path(tessdata).exists():
+                tessdata = os.environ.get("TESSDATA_PREFIX", "")
+                if tessdata and Path(tessdata).exists():
                     tp = p_doc[0].get_textpage_ocr(tessdata=tessdata, language="eng")
                     extracted_text = tp.extractText().strip()
                 p_doc.close()

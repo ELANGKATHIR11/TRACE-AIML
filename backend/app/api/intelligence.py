@@ -8,9 +8,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
+from app.config import settings
 from app.database import get_session
 from app.models.models import User
-from app.services.security import get_current_user
+from app.services import workflow
+from app.services.access import load_application, require_staff
+from app.services.document_storage import read_upload_limited
 
 router = APIRouter(prefix="/api", tags=["AI, ML & Intake Tools"])
 
@@ -29,7 +32,7 @@ class ClassifyRequest(BaseModel):
 
 
 @router.get("/models/metrics")
-def model_metrics(current_user: User = Depends(get_current_user)) -> Dict[str, Any]:
+def model_metrics(current_user: User = Depends(require_staff)) -> Dict[str, Any]:
     """Evaluation metrics persisted at training time, plus which artifacts exist on disk."""
     from app.services.ml_training_platform import ml_training_platform as ml
 
@@ -49,15 +52,21 @@ def model_metrics(current_user: User = Depends(get_current_user)) -> Dict[str, A
 
 
 @router.post("/models/predict-document")
-def predict_document(payload: ClassifyRequest, current_user: User = Depends(get_current_user)):
-    from app.services.ml_training_platform import ml_training_platform
-    return ml_training_platform.predict_document_type(payload.text)
+def predict_document(payload: ClassifyRequest, current_user: User = Depends(require_staff)):
+    from app.services.ml_training_platform import ModelUnavailable, ml_training_platform
+    try:
+        return ml_training_platform.predict_document_type(payload.text)
+    except ModelUnavailable:
+        raise HTTPException(status_code=503, detail="Model unavailable")
 
 
 @router.post("/models/predict-forgery")
-def predict_forgery(payload: ForgeryFeatures, current_user: User = Depends(get_current_user)):
-    from app.services.ml_training_platform import ml_training_platform
-    return ml_training_platform.predict_forgery_risk(payload.model_dump())
+def predict_forgery(payload: ForgeryFeatures, current_user: User = Depends(require_staff)):
+    from app.services.ml_training_platform import ModelUnavailable, ml_training_platform
+    try:
+        return ml_training_platform.predict_forgery_risk(payload.model_dump())
+    except ModelUnavailable:
+        raise HTTPException(status_code=503, detail="Model unavailable")
 
 
 # ---------------------------------------------------------------------- RAG
@@ -68,9 +77,16 @@ class RagQuery(BaseModel):
 
 
 @router.post("/rag/search")
-def rag_search(payload: RagQuery, current_user: User = Depends(get_current_user)) -> Dict[str, Any]:
+def rag_search(
+    payload: RagQuery,
+    session=Depends(get_session),
+    current_user: User = Depends(require_staff),
+) -> Dict[str, Any]:
     """Semantic search over the indexed Approval Process Handbook clauses (and, optionally,
     over an application's indexed document text for cross-document lookups)."""
+    if payload.application_id is not None:
+        load_application(session, payload.application_id, current_user)
+
     from app.services.vector_rag_service import vector_rag_service
 
     clauses = vector_rag_service.query_regulatory_knowledge(payload.query, top_k=payload.top_k)
@@ -85,16 +101,14 @@ def rag_search(payload: RagQuery, current_user: User = Depends(get_current_user)
 async def inspect_media(
     file: UploadFile = File(...),
     ocr_text: str = Form(""),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ) -> Dict[str, Any]:
     """Analyse a floor plan / photo / walkthrough video without attaching it to an application."""
     from app.services.multi_source_ingestion import multi_source_ingestion
 
-    contents = await file.read()
+    contents = await read_upload_limited(file, 50 * 2**20)
     if not contents:
         raise HTTPException(status_code=400, detail="Empty file")
-    if len(contents) > 200 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File exceeds 200 MB limit")
     name = file.filename or "upload"
 
     # Rasterised plans carry no embedded text; run OCR so room dimensions can be read.
@@ -108,31 +122,23 @@ async def inspect_media(
 
 
 def _ocr_bytes(contents: bytes, name: str) -> str:
-    import tempfile
-    from pathlib import Path
     from app.services.ocr_service import ocr_service
 
-    suffix = Path(name).suffix.lower() or ".pdf"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        tmp.write(contents)
-        tmp_path = Path(tmp.name)
     try:
-        return ocr_service.extract_document(tmp_path).get("full_text", "") or ""
+        return ocr_service.extract_document_bytes(contents, name).get("full_text", "") or ""
     except Exception:
         return ""
-    finally:
-        tmp_path.unlink(missing_ok=True)
 
 
 @router.post("/intake/authority-check")
 async def authority_check(
     file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ) -> Dict[str, Any]:
     """Inspect an uploaded certificate for QR codes and embedded digital signatures."""
     from app.services.issuing_authority_hub import issuing_authority_hub
 
-    contents = await file.read()
+    contents = await read_upload_limited(file, settings.MAX_UPLOAD_MB * 2**20)
     if not contents:
         raise HTTPException(status_code=400, detail="Empty file")
     text = _ocr_bytes(contents, file.filename or "upload.pdf")
@@ -148,19 +154,25 @@ async def authority_check(
 def agent_review(
     application_id: int,
     session=Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_staff),
 ) -> Dict[str, Any]:
-    """Run the grounded three-role AI review. Returns available=False if the local model is down."""
-    from app.models.enums import UserRole
-    from app.models.models import Application
-    from app.services.multi_agent_workflow import multi_agent_workflow_service
+    """Run the grounded three-role AI review. 503 if the local model server is down.
+
+    Advisory only: never changes the application's status (spec §6.1).
+    """
+    app_obj = load_application(session, application_id, current_user)
+    workflow.ensure_status(app_obj, workflow.REVIEWABLE, "run an AI review on")
+
     from app.services.audit_service import log_audit_event
 
-    app_obj = session.get(Application, application_id)
-    if not app_obj:
-        raise HTTPException(status_code=404, detail="Application not found")
-    if current_user.role == UserRole.APPLICANT and app_obj.institution_id != current_user.institution_id:
-        raise HTTPException(status_code=403, detail="Access denied: application belongs to another institution.")
+    try:
+        from app.services.multi_agent_workflow import multi_agent_workflow_service
+    except ImportError:
+        # Optional AI dependencies (vector store / agent framework) are not installed.
+        raise HTTPException(status_code=503, detail="AI review unavailable")
+
+    if not multi_agent_workflow_service.is_available():
+        raise HTTPException(status_code=503, detail="AI review unavailable")
 
     result = multi_agent_workflow_service.run_scrutiny_workflow(session, application_id)
     log_audit_event(

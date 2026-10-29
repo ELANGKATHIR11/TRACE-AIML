@@ -1,11 +1,11 @@
 """Integrated CrewAI Multi-Agent & LangGraph StateGraph Orchestration Engine for TRACE.
 
 Combines:
-1. CrewAI (f:/TRACE/crewAI-main):
+1. CrewAI:
    - Agent: Autonomous roles (Forensic Auditor, Regulatory Compliance Officer, Evidence Compiler)
    - Task: Goal-oriented regulatory scrutiny tasks with expected outputs
    - Crew: Hierarchical / sequential team deliberation
-2. LangGraph StateGraph (f:/TRACE/langgraph-main):
+2. LangGraph StateGraph:
    - Directed acyclic state graph routing data, state checkpoints, and human-in-the-loop gates
 3. Local Sovereign AI:
    - ChromaDB Vector RAG (Approval Process Handbook)
@@ -13,30 +13,9 @@ Combines:
 """
 
 import logging
-import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypedDict
-from sqlmodel import Session, select
-
-# Link local sovereign LangGraph repository (f:/TRACE/langgraph-main)
-LANGGRAPH_CORE_LIBS = [
-    Path("f:/TRACE/langgraph-main/libs/checkpoint"),
-    Path("f:/TRACE/langgraph-main/libs/langgraph"),
-    Path("f:/TRACE/langgraph-main/libs/prebuilt"),
-]
-for lib_path in LANGGRAPH_CORE_LIBS:
-    if lib_path.exists() and str(lib_path) not in sys.path:
-        sys.path.insert(0, str(lib_path))
-
-# Link local sovereign CrewAI repository (f:/TRACE/crewAI-main)
-CREWAI_CORE_LIBS = [
-    Path("f:/TRACE/crewAI-main/lib/crewai-core/src"),
-    Path("f:/TRACE/crewAI-main/lib/crewai/src"),
-    Path("f:/TRACE/crewAI-main/lib/crewai-tools/src"),
-]
-for lib_path in CREWAI_CORE_LIBS:
-    if lib_path.exists() and str(lib_path) not in sys.path:
-        sys.path.insert(0, str(lib_path))
+from sqlmodel import Session
 
 try:
     from langgraph.graph import StateGraph, END  # type: ignore
@@ -52,7 +31,8 @@ try:
 except ImportError:
     HAS_CREWAI = False
 
-from app.models.models import Application, Document, ValidationFlag
+from app.models.models import Application
+from app.services import workflow
 from app.services.ollama_service import ollama_service
 from app.services.vector_rag_service import vector_rag_service
 
@@ -231,16 +211,17 @@ def evidence_compiler_node(state: ScrutinyState) -> ScrutinyState:
 # Compile LangGraph StateGraph DAG
 # -------------------------------------------------------------------------
 if HAS_LANGGRAPH and StateGraph is not None:
-    workflow = StateGraph(ScrutinyState)
-    workflow.add_node("forensic_auditor", forensic_auditor_node)
-    workflow.add_node("compliance_officer", compliance_officer_node)
-    workflow.add_node("evidence_compiler", evidence_compiler_node)
+    # Not named `workflow`: that would shadow the app.services.workflow module used below.
+    graph_builder = StateGraph(ScrutinyState)
+    graph_builder.add_node("forensic_auditor", forensic_auditor_node)
+    graph_builder.add_node("compliance_officer", compliance_officer_node)
+    graph_builder.add_node("evidence_compiler", evidence_compiler_node)
 
-    workflow.set_entry_point("forensic_auditor")
-    workflow.add_edge("forensic_auditor", "compliance_officer")
-    workflow.add_edge("compliance_officer", "evidence_compiler")
-    workflow.add_edge("evidence_compiler", END)
-    orchestrated_scrutiny_graph = workflow.compile()
+    graph_builder.set_entry_point("forensic_auditor")
+    graph_builder.add_edge("forensic_auditor", "compliance_officer")
+    graph_builder.add_edge("compliance_officer", "evidence_compiler")
+    graph_builder.add_edge("evidence_compiler", END)
+    orchestrated_scrutiny_graph = graph_builder.compile()
 else:
     orchestrated_scrutiny_graph = None
 
@@ -251,13 +232,17 @@ else:
 class MultiAgentWorkflowService:
     """Orchestrates CrewAI Multi-Agent Delegation within LangGraph State Machine."""
 
+    def is_available(self) -> bool:
+        """True when the local Ollama model server is reachable."""
+        return ollama_service.is_available()
+
     def run_scrutiny_workflow(self, db: Session, application_id: int) -> Dict[str, Any]:
         app_obj = db.get(Application, application_id)
         if not app_obj:
             raise ValueError(f"Application #{application_id} not found")
 
-        docs = db.exec(select(Document).where(Document.application_id == application_id)).all()
-        flags = db.exec(select(ValidationFlag).where(ValidationFlag.application_id == application_id)).all()
+        docs = workflow.current_documents(db, application_id)
+        flags = workflow.current_flags(db, application_id)
 
         initial_state: ScrutinyState = {
             "application_id": application_id,
@@ -304,8 +289,8 @@ class MultiAgentWorkflowService:
             "application_id": application_id,
             "application_number": app_obj.application_number,
             "frameworks": [
-                "LangGraph StateGraph Engine (f:/TRACE/langgraph-main)",
-                "CrewAI Multi-Agent Architecture (f:/TRACE/crewAI-main)",
+                "LangGraph StateGraph Engine",
+                "CrewAI Multi-Agent Architecture",
                 "ChromaDB Vector RAG",
                 "Ollama Qwen 2.5 LLM",
             ],

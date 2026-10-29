@@ -41,6 +41,19 @@ export function ApiLoadingState({
   );
 }
 
+/** 409 bodies carry `current_status` and, for submission, `missing_document_types` (spec §8). */
+function conflictDetails(body: unknown): { currentStatus?: string; missingDocumentTypes: string[] } {
+  const record =
+    typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+  const missing = Array.isArray(record.missing_document_types)
+    ? record.missing_document_types.filter((v): v is string => typeof v === 'string')
+    : [];
+  return {
+    currentStatus: typeof record.current_status === 'string' ? record.current_status : undefined,
+    missingDocumentTypes: missing,
+  };
+}
+
 export function ApiErrorState({
   title = 'Backend API Request Failed',
   error,
@@ -56,10 +69,11 @@ export function ApiErrorState({
 }) {
   const apiErr = error instanceof ApiClientError ? error : null;
   const status = apiErr?.status;
-  const code = apiErr?.code ?? 'HTTP_ERROR';
+  const code = apiErr ? 'HTTP_ERROR' : 'TRANSPORT_ERROR';
   const targetEndpoint = apiErr?.endpoint || endpoint || 'Unknown endpoint';
   const message =
     error instanceof Error ? error.message : 'An unexpected transport error occurred.';
+  const conflict = apiErr?.status === 409 ? conflictDetails(apiErr.body) : null;
 
   return (
     <div
@@ -77,15 +91,25 @@ export function ApiErrorState({
               <span>{status ? `HTTP ${status}` : 'No HTTP Response'}</span>
               <span aria-hidden="true">·</span>
               <span>{targetEndpoint}</span>
-              {apiErr?.correlationId && (
+              {apiErr?.errorId && (
                 <>
                   <span aria-hidden="true">·</span>
-                  <span>Req ID: {apiErr.correlationId}</span>
+                  <span>Reference: {apiErr.errorId}</span>
                 </>
               )}
             </div>
             <h3 className="text-sm font-semibold text-[#7F1D1D]">{title}</h3>
             <p className="text-xs leading-relaxed text-[#7F1D1D] max-w-3xl">{message}</p>
+            {conflict?.currentStatus && (
+              <p className="text-xs font-mono text-[#7F1D1D]">
+                Current application status: {conflict.currentStatus}
+              </p>
+            )}
+            {conflict && conflict.missingDocumentTypes.length > 0 && (
+              <p className="text-xs font-mono text-[#7F1D1D]">
+                Missing documents: {conflict.missingDocumentTypes.join(', ')}
+              </p>
+            )}
             <p className="text-xs text-[#991B1B] pt-0.5">
               Zero-Mock Policy Active: No fabricated or fallback records are substituted while the
               endpoint is unreachable or returning an error.

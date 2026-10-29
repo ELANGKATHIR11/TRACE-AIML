@@ -9,9 +9,10 @@ Output is advisory only and is recorded in the audit log.
 import logging
 from typing import Any, Dict, List
 
-from sqlmodel import Session, select
+from sqlmodel import Session
 
-from app.models.models import Application, Document, ValidationFlag
+from app.models.models import Application, ValidationFlag
+from app.services import workflow
 from app.services.ollama_service import ollama_service
 
 logger = logging.getLogger(__name__)
@@ -46,8 +47,8 @@ class AgentReviewService:
                 "steps": [],
             }
 
-        docs = db.exec(select(Document).where(Document.application_id == application_id)).all()
-        flags = db.exec(select(ValidationFlag).where(ValidationFlag.application_id == application_id)).all()
+        docs = workflow.current_documents(db, application_id)
+        flags = workflow.current_flags(db, application_id)
         if not flags and not docs:
             return {"available": True, "reason": "No documents or findings to review yet.", "steps": []}
 

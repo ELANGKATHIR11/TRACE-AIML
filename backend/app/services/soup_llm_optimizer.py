@@ -1,5 +1,5 @@
 """Soup-Optimized Modelfile Generator for AICTE TRACE Regulatory Platform.
-Leverages Soup's low-resource deployment patterns (f:/TRACE/Soup-main):
+Leverages Soup's low-resource deployment patterns :
 - Bounded context window (`num_ctx 2048` instead of 32k) saving ~1.2 GB VRAM.
 - Pinned batch sizing (`num_predict 1024`, `num_thread 6`).
 - Deterministic sampling (`temperature 0.1`, `top_k 20`, `top_p 0.9`).
@@ -11,11 +11,12 @@ import os
 from pathlib import Path
 import subprocess
 
-SOUP_SRC = Path("f:/TRACE/Soup-main/src")
-if SOUP_SRC.exists() and str(SOUP_SRC) not in sys.path:
-    sys.path.insert(0, str(SOUP_SRC))
-
-from soup_cli.utils.ollama import create_modelfile, deploy_to_ollama, ALLOWED_OLLAMA_PARAMS
+try:
+    from soup_cli.utils.ollama import create_modelfile, deploy_to_ollama, ALLOWED_OLLAMA_PARAMS
+    HAS_SOUP = True
+except ImportError:  # optional dependency: Soup profile deployment is unavailable without it
+    create_modelfile = deploy_to_ollama = ALLOWED_OLLAMA_PARAMS = None
+    HAS_SOUP = False
 
 SYSTEM_PROMPT = (
     "You are TRACE-AICTE, a 100% offline, air-gapped sovereign AI regulatory compliance auditor. "
@@ -36,6 +37,8 @@ SOUP_LOW_RESOURCE_PARAMS = {
 
 def build_and_deploy_soup_profile(base_model: str = "qwen2.5:1.5b-instruct", target_name: str = "soup-trace-lite"):
     """Create an optimized Modelfile with Soup hardware parameters and deploy to local Ollama."""
+    if not HAS_SOUP:
+        raise RuntimeError("soup_cli is not installed; Soup profile deployment is unavailable")
     modelfile_lines = [
         f"FROM {base_model}",
         f'SYSTEM "{SYSTEM_PROMPT}"',

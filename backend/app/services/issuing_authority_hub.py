@@ -370,9 +370,11 @@ class IssuingAuthorityHub:
             })
 
         # 4. Check Building Area or Approved Intake mismatch
-        if "approved_intake_total" in authority_record and declared_data.get("approved_intake_baseline"):
+        # `total_intake` is the DeclaredData field; `approved_intake_baseline` is the legacy key.
+        declared_intake = declared_data.get("total_intake") or declared_data.get("approved_intake_baseline")
+        if "approved_intake_total" in authority_record and declared_intake:
             off_intake = int(authority_record["approved_intake_total"])
-            dec_intake = int(declared_data["approved_intake_baseline"])
+            dec_intake = int(declared_intake)
             if off_intake != dec_intake:
                 msg = f"Official EoA record specifies {off_intake} intake, but declared baseline is {dec_intake}."
                 discrepancies.append(msg)

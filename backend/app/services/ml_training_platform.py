@@ -6,6 +6,8 @@ Includes:
 100% Offline, CPU/GPU accelerated, zero cloud dependencies.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import pickle
@@ -27,11 +29,62 @@ MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "models_registry"
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+HASHES_FILE = "MODEL_HASHES.json"
+
+
+class ModelUnavailable(Exception):
+    """Raised when a model artifact is missing, unpinned, or does not match its pinned hash."""
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _read_hashes(directory: Path) -> Dict[str, str]:
+    try:
+        data = json.loads((directory / HASHES_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def pin_model(path: Path) -> None:
+    """Record the sha256 of a freshly written artifact in MODEL_HASHES.json next to it."""
+    hashes = _read_hashes(path.parent)
+    hashes[path.name] = _sha256(path)
+    (path.parent / HASHES_FILE).write_text(json.dumps(hashes, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def load_pinned(path: Path) -> object:
+    """Unpickle `path` only if its sha256 matches the pinned hash in the adjacent MODEL_HASHES.json."""
+    path = Path(path)
+    expected = _read_hashes(path.parent).get(path.name)
+    if not expected or not path.is_file():
+        raise ModelUnavailable(f"{path.name} is missing or not pinned")
+    if not hmac.compare_digest(_sha256(path), str(expected)):
+        logger.error("Model artifact %s failed hash verification", path.name)
+        raise ModelUnavailable(f"{path.name} failed hash verification")
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
 class RealMLTrainingPlatform:
-    def __init__(self):
-        self.doc_classifier_path = MODELS_DIR / "document_classifier_v1.pkl"
-        self.forgery_classifier_path = MODELS_DIR / "forgery_detector_v1.pkl"
-        self.metrics_path = MODELS_DIR / "training_evaluation_metrics.json"
+    # Resolved at call time so a relocated MODELS_DIR is honoured.
+    @property
+    def doc_classifier_path(self) -> Path:
+        return MODELS_DIR / "document_classifier_v1.pkl"
+
+    @property
+    def forgery_classifier_path(self) -> Path:
+        return MODELS_DIR / "forgery_detector_v1.pkl"
+
+    @property
+    def metrics_path(self) -> Path:
+        return MODELS_DIR / "training_evaluation_metrics.json"
 
     def train_document_classifier(self, training_data: List[Dict[str, str]]) -> Dict[str, Any]:
         """
@@ -60,6 +113,7 @@ class RealMLTrainingPlatform:
         # Save model artifact
         with open(self.doc_classifier_path, "wb") as f:
             pickle.dump(pipeline, f)
+        pin_model(self.doc_classifier_path)
 
         metrics = {
             "model_name": "document_classifier_v1",
@@ -119,6 +173,7 @@ class RealMLTrainingPlatform:
 
         with open(self.forgery_classifier_path, "wb") as f:
             pickle.dump(clf, f)
+        pin_model(self.forgery_classifier_path)
 
         metrics = {
             "model_name": "forgery_detector_v1",
@@ -141,8 +196,7 @@ class RealMLTrainingPlatform:
         if not self.doc_classifier_path.exists():
             return {"predicted": None, "confidence": 0.0, "status": "Model not trained yet"}
 
-        with open(self.doc_classifier_path, "rb") as f:
-            pipeline = pickle.load(f)
+        pipeline = load_pinned(self.doc_classifier_path)
 
         pred = pipeline.predict([text])[0]
         probs = pipeline.predict_proba([text])[0]
@@ -159,8 +213,7 @@ class RealMLTrainingPlatform:
         if not self.forgery_classifier_path.exists():
             return {"is_tampered": False, "tamper_score": 0.0, "status": "Model not trained yet"}
 
-        with open(self.forgery_classifier_path, "rb") as f:
-            clf = pickle.load(f)
+        clf = load_pinned(self.forgery_classifier_path)
 
         feats = np.array([[
             float(forensic_features.get("ela_std_error", 0.0)),

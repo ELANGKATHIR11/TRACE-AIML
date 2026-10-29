@@ -27,6 +27,13 @@ class ApplicationStatus(str, Enum):
     REJECTED_BY_REVIEWER = "REJECTED_BY_REVIEWER"
 
 
+class OfficerDecisionType(str, Enum):
+    """Binding reviewer determination (spec §6.2)."""
+    APPROVE = "APPROVE"
+    REQUEST_RECTIFICATION = "REQUEST_RECTIFICATION"
+    REJECT = "REJECT"
+
+
 class DocumentType(str, Enum):
     AFFIDAVIT = "AFFIDAVIT"
     FIRE_SAFETY_CERTIFICATE = "FIRE_SAFETY_CERTIFICATE"

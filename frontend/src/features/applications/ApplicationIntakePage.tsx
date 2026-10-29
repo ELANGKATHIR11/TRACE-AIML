@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   FileUp,
   FolderPlus,
+  Send,
   Upload,
 } from 'lucide-react';
 import {
@@ -16,6 +17,7 @@ import {
 import { invalidateAllAppQueries } from '../../lib/api/cacheSync';
 import {
   createApplication,
+  submitApplication,
   uploadApplicationDocument,
 } from '../../lib/api/endpoints';
 import { ApiClientError } from '../../lib/api/transport';
@@ -31,14 +33,13 @@ import {
 } from '../../lib/utils/formatters';
 import { ApiErrorState, StatusIndicator } from '../../components/ApiStateFeedback';
 import { DossierStack3D, Tactile3DCard } from '../../components/Tactile3DElements';
-import { useIdentity } from '../identity/IdentityContext';
 
+// Mirrors the backend ApplicationCategory enum.
 const SUPPORTED_APPLICATION_CATEGORIES = [
   'NEW_INSTITUTION',
   'EXTENSION_OF_APPROVAL',
   'INCREASE_IN_INTAKE',
-  'NEW_COURSE_PROGRAMME',
-  'CHANGE_OF_SITE_LOCATION',
+  'CHANGE_OF_SITE_OR_INFRA',
 ];
 
 const SUPPORTED_DOCUMENT_CATEGORIES = [
@@ -52,8 +53,16 @@ const SUPPORTED_DOCUMENT_CATEGORIES = [
   { value: 'INFRASTRUCTURE_EVIDENCE', label: 'Infrastructure Evidence (Photos / Floor Plans)' },
 ];
 
+const INTAKE_FIELD_IDS: Record<keyof ApplicationIntakeFormValues, true> = {
+  category: true,
+  academic_year: true,
+  land_area_acres: true,
+  built_up_area_sqm: true,
+  total_intake: true,
+  faculty_count: true,
+};
+
 export function ApplicationIntakePage() {
-  const { activePersona } = useIdentity();
   const queryClient = useQueryClient();
 
   const [createdApp, setCreatedApp] = useState<ApplicationRecord | null>(null);
@@ -76,20 +85,25 @@ export function ApplicationIntakePage() {
     defaultValues: {
       category: 'EXTENSION_OF_APPROVAL',
       academic_year: '2026-27',
-      declared_land_area: undefined,
-      built_up_area: undefined,
+      land_area_acres: undefined,
+      built_up_area_sqm: undefined,
       total_intake: undefined,
       faculty_count: undefined,
-      institution_name: '',
     },
   });
 
   const createAppMutation = useMutation({
+    // The institution is taken from the signed-in applicant by the backend, never from the body.
     mutationFn: (values: ApplicationIntakeFormValues) =>
       createApplication({
-        ...values,
-        institution_id: activePersona.institutionId ?? 1,
-        institution_name: values.institution_name?.trim() || undefined,
+        category: values.category,
+        academic_year: values.academic_year,
+        declared_data: {
+          land_area_acres: values.land_area_acres,
+          built_up_area_sqm: values.built_up_area_sqm,
+          total_intake: values.total_intake,
+          faculty_count: values.faculty_count,
+        },
       }),
     retry: false, // Never auto-retry non-idempotent application creation
     onSuccess: (data) => {
@@ -101,10 +115,11 @@ export function ApplicationIntakePage() {
       reset();
     },
     onError: (err) => {
-      if (err instanceof ApiClientError && err.fieldErrors.length > 0) {
-        for (const fe of err.fieldErrors) {
-          const fieldName = fe.field as keyof ApplicationIntakeFormValues;
-          setError(fieldName, { type: 'server', message: fe.message });
+      if (err instanceof ApiClientError) {
+        for (const [field, message] of Object.entries(err.fieldErrors)) {
+          if (Object.hasOwn(INTAKE_FIELD_IDS, field)) {
+            setError(field as keyof ApplicationIntakeFormValues, { type: 'server', message });
+          }
         }
       }
     },
@@ -121,6 +136,14 @@ export function ApplicationIntakePage() {
     },
   });
 
+  const submitMutation = useMutation({
+    mutationFn: (id: string) => submitApplication(id),
+    retry: false, // Submission is a status transition; never auto-retry
+    onSuccess: (data) => {
+      invalidateAllAppQueries(queryClient, { applicationId: data.id, reason: 'APPLICATION_SUBMITTED' });
+    },
+  });
+
   const onSubmitIntake = (values: ApplicationIntakeFormValues) => {
     setCreatedApp(null);
     createAppMutation.mutate(values);
@@ -133,9 +156,9 @@ export function ApplicationIntakePage() {
       setSelectedFile(null);
       return;
     }
-    const validation = validateUploadFile(file);
-    if (!validation.valid) {
-      setClientFileError(validation.error ?? 'Invalid file.');
+    const fileProblem = validateUploadFile(file);
+    if (fileProblem) {
+      setClientFileError(fileProblem);
       setSelectedFile(null);
       return;
     }
@@ -149,12 +172,12 @@ export function ApplicationIntakePage() {
       return;
     }
     if (!selectedFile) {
-      setClientFileError('Please select a valid PDF, PNG, JPEG, or TIFF document to upload.');
+      setClientFileError('Please select a valid PDF, PNG, or JPEG document to upload.');
       return;
     }
-    const validation = validateUploadFile(selectedFile);
-    if (!validation.valid) {
-      setClientFileError(validation.error ?? 'Invalid file.');
+    const fileProblem = validateUploadFile(selectedFile);
+    if (fileProblem) {
+      setClientFileError(fileProblem);
       return;
     }
     setClientFileError(null);
@@ -247,22 +270,6 @@ export function ApplicationIntakePage() {
               </div>
             </div>
 
-            <div>
-              <label
-                htmlFor="intake-institution-name"
-                className="block text-xs font-semibold text-[#0F1E36] mb-1"
-              >
-                Institution Name (Optional if resolved via Institution ID #{activePersona.institutionId ?? 1})
-              </label>
-              <input
-                id="intake-institution-name"
-                type="text"
-                placeholder="Enter registered technical institution name"
-                {...register('institution_name')}
-                className="w-full px-3 py-2 text-xs bg-[#F4F6F9] border border-[#CBD5E1] text-[#0F1E36]"
-              />
-            </div>
-
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label
@@ -277,12 +284,12 @@ export function ApplicationIntakePage() {
                   step="0.01"
                   min="0.01"
                   placeholder="e.g., 10.5"
-                  {...register('declared_land_area', { valueAsNumber: true })}
+                  {...register('land_area_acres', { valueAsNumber: true })}
                   className="w-full px-3 py-2 text-xs font-mono bg-[#F4F6F9] border border-[#CBD5E1] text-[#0F1E36]"
                 />
-                {errors.declared_land_area && (
+                {errors.land_area_acres && (
                   <p role="alert" className="mt-1 text-xs text-[#B91C1C] font-medium">
-                    {errors.declared_land_area.message}
+                    {errors.land_area_acres.message}
                   </p>
                 )}
               </div>
@@ -300,12 +307,12 @@ export function ApplicationIntakePage() {
                   step="0.1"
                   min="1"
                   placeholder="e.g., 14500"
-                  {...register('built_up_area', { valueAsNumber: true })}
+                  {...register('built_up_area_sqm', { valueAsNumber: true })}
                   className="w-full px-3 py-2 text-xs font-mono bg-[#F4F6F9] border border-[#CBD5E1] text-[#0F1E36]"
                 />
-                {errors.built_up_area && (
+                {errors.built_up_area_sqm && (
                   <p role="alert" className="mt-1 text-xs text-[#B91C1C] font-medium">
-                    {errors.built_up_area.message}
+                    {errors.built_up_area_sqm.message}
                   </p>
                 )}
               </div>
@@ -387,10 +394,10 @@ export function ApplicationIntakePage() {
                   </p>
                   <p>
                     <Link
-                      to={`/applications/${encodeURIComponent(String(createdApp.id))}`}
+                      to={`/applicant/applications/${encodeURIComponent(String(createdApp.id))}`}
                       className="underline font-semibold text-[#1B365D]"
                     >
-                      Open Dossier #{String(createdApp.id)} in Scrutiny Cockpit →
+                      Open Dossier #{String(createdApp.id)} →
                     </Link>
                   </p>
                 </div>
@@ -473,14 +480,14 @@ export function ApplicationIntakePage() {
                 htmlFor="upload-file-input"
                 className="block text-xs font-semibold text-[#0F1E36] mb-1"
               >
-                Evidentiary Document File (PDF, PNG, JPEG, TIFF · Max 25 MB) *
+                Evidentiary Document File (PDF, PNG, JPEG · Max 25 MB) *
               </label>
               <div className="border border-dashed border-[#CBD5E1] bg-[#F4F6F9] p-4 text-center">
                 <Upload className="w-5 h-5 text-[#475569] mx-auto mb-1.5" aria-hidden="true" />
                 <input
                   id="upload-file-input"
                   type="file"
-                  accept=".pdf,.png,.jpg,.jpeg,.tiff,.tif,application/pdf,image/png,image/jpeg,image/tiff"
+                  accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg"
                   onChange={handleFileChange}
                   className="block w-full text-xs text-[#334155] file:mr-3 file:py-1.5 file:px-3 file:border file:border-[#CBD5E1] file:text-xs file:font-semibold file:bg-white file:text-[#1B365D] hover:file:bg-[#F8FAFC] cursor-pointer"
                 />
@@ -517,6 +524,48 @@ export function ApplicationIntakePage() {
               </button>
             </div>
           </form>
+
+          {/* Step 3 — Submit for scrutiny */}
+          {targetAppId.trim() && (
+            <div className="pt-4 border-t border-[#CBD5E1] space-y-3">
+              <div className="flex items-center gap-2">
+                <Send className="w-4 h-4 text-[#1B365D]" aria-hidden="true" />
+                <h3 className="text-base font-bold text-[#0F1E36]">03. Submit for Scrutiny</h3>
+              </div>
+              <p className="text-xs text-[#334155]">
+                Submitting locks the dossier for review. All required statutory documents must be
+                uploaded first. Target Endpoint:{' '}
+                <code className="font-mono">POST /api/applications/{'{id}'}/submit</code>
+              </p>
+              {submitMutation.isError && (
+                <ApiErrorState
+                  title="Application Submission Failed"
+                  error={submitMutation.error}
+                  endpoint={`POST /api/applications/${targetAppId.trim()}/submit`}
+                />
+              )}
+              {submitMutation.isSuccess && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="border border-[#86EFAC] bg-[#F0FDF4] p-3 text-xs text-[#14532D]"
+                >
+                  Application #{String(submitMutation.data.id)} submitted. Status:{' '}
+                  <strong>{formatApiValue(submitMutation.data.status)}</strong>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => submitMutation.mutate(targetAppId.trim())}
+                  disabled={submitMutation.isPending || submitMutation.isSuccess}
+                  className="btn-tactile-3d px-4 py-2 text-xs font-semibold text-white bg-[#1B365D] hover:bg-[#0F1E36] disabled:opacity-60 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  {submitMutation.isPending ? 'Submitting...' : 'Submit application'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Uploaded Documents in Session */}
           {uploadedDocs.length > 0 && (
